@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useCallback, useRef, FormEvent } from 'react'
 
+// Idle auto-lock: lock chat after 5 minutes of inactivity
+const IDLE_TIMEOUT_MS = 5 * 60 * 1000
+
 interface ChatPinGateProps {
   children: React.ReactNode
 }
@@ -24,6 +27,7 @@ export default function ChatPinGate({ children }: ChatPinGateProps) {
   const [newPin, setNewPin] = useState('')
   const [confirmNewPin, setConfirmNewPin] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const checkStatus = useCallback(async () => {
     try {
@@ -49,6 +53,36 @@ export default function ChatPinGate({ children }: ChatPinGateProps) {
       inputRef.current.focus()
     }
   }, [status])
+
+  // Idle auto-lock: re-lock chat if user is inactive for IDLE_TIMEOUT_MS
+  const lockChat = useCallback(async () => {
+    if (!status?.pinRequired || status?.locked) return
+    try {
+      await fetch('/api/auth/chat-lock-status', { method: 'POST' })
+      await checkStatus()
+    } catch {
+      // ignore
+    }
+  }, [status, checkStatus])
+
+  const resetIdleTimer = useCallback(() => {
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
+    idleTimerRef.current = setTimeout(lockChat, IDLE_TIMEOUT_MS)
+  }, [lockChat])
+
+  useEffect(() => {
+    // Only run idle timer when chat is unlocked and PIN is required
+    if (!status?.pinRequired || status?.locked) return
+
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll']
+    events.forEach((evt) => window.addEventListener(evt, resetIdleTimer, { passive: true }))
+    resetIdleTimer() // start the timer
+
+    return () => {
+      events.forEach((evt) => window.removeEventListener(evt, resetIdleTimer))
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
+    }
+  }, [status?.pinRequired, status?.locked, resetIdleTimer])
 
   const handleVerifyPin = useCallback(async (e: FormEvent) => {
     e.preventDefault()

@@ -6,10 +6,18 @@ import { runClaudeLoop } from '@/lib/claude/tool-handler'
 import { checkRateLimit } from '@/lib/rate-limit'
 import { verifyChatUnlockToken, PIN_UNLOCK_COOKIE, isPinLockedOut } from '@/lib/auth/pin'
 import { loadSensitivityRules, applyDataMasking } from '@/lib/security/data-masking'
+import { loadSensitiveFieldRules, applyFieldMasking } from '@/lib/security/field-sensitivity'
+import { isIpAllowed } from '@/lib/security/ip-allowlist'
+import { logSecurityEvent, getClientIp, getUserAgent } from '@/lib/security/audit-events'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
+
+// Export control: max messages per single request to prevent bulk extraction
+const MAX_MESSAGES_PER_REQUEST = 100
+// Export control: max total content length in a single request
+const MAX_CONTENT_LENGTH = 500_000
 
 const chatRequestSchema = z.object({
   messages: z
@@ -20,18 +28,38 @@ const chatRequestSchema = z.object({
       })
     )
     .min(1)
-    .max(100),
+    .max(MAX_MESSAGES_PER_REQUEST),
   confirmationToken: z.string().max(5000).optional(),
 })
 
 export async function POST(request: NextRequest) {
+  const clientIp = getClientIp(request)
+  const userAgent = getUserAgent(request)
+
   // 1. Auth check
   const user = await getUserFromRequest(request)
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  // 2. Chat PIN verification — if user has PIN required, check unlock cookie
+  // 2. IP allowlist check
+  const ipAllowed = await isIpAllowed(clientIp)
+  if (!ipAllowed) {
+    await logSecurityEvent({
+      userId: user.id,
+      userEmail: user.email,
+      eventType: 'IP_BLOCKED',
+      detail: `Chat access blocked for IP ${clientIp}`,
+      ipAddress: clientIp,
+      userAgent,
+    })
+    return NextResponse.json(
+      { error: 'Access denied from your current network.' },
+      { status: 403 }
+    )
+  }
+
+  // 3. Chat PIN verification — if user has PIN required, check unlock cookie
   if (user.chatPinRequired && user.chatPinHash) {
     if (isPinLockedOut(user.chatPinLockedUntil)) {
       return NextResponse.json(
@@ -56,7 +84,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 3. Rate limit check
+  // 4. Rate limit check
   const rateLimit = checkRateLimit(user.id)
   if (!rateLimit.allowed) {
     return NextResponse.json(
@@ -71,7 +99,7 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  // 3. Parse and validate request body
+  // 5. Parse and validate request body
   let body: unknown
   try {
     body = await request.json()
@@ -89,13 +117,30 @@ export async function POST(request: NextRequest) {
 
   const { messages, confirmationToken } = parsed.data
 
-  // 4. Sanitize user messages
+  // 6. Export control: check total content length to prevent bulk extraction
+  const totalContentLength = messages.reduce((acc, m) => acc + m.content.length, 0)
+  if (totalContentLength > MAX_CONTENT_LENGTH) {
+    await logSecurityEvent({
+      userId: user.id,
+      userEmail: user.email,
+      eventType: 'BULK_ACCESS_BLOCKED',
+      detail: `Blocked request with ${totalContentLength} chars across ${messages.length} messages`,
+      ipAddress: clientIp,
+      userAgent,
+    })
+    return NextResponse.json(
+      { error: 'Request too large. Please reduce message history.' },
+      { status: 413 }
+    )
+  }
+
+  // 7. Sanitize user messages
   const sanitizedMessages = messages.map((m) => ({
     role: m.role,
     content: sanitizeInput(m.content),
   }))
 
-  // 5. Set up MCP client and stream response
+  // 8. Set up MCP client and stream response
   let mcpClient: Awaited<ReturnType<typeof createMCPClient>> | null = null
   const encoder = new TextEncoder()
 
@@ -109,8 +154,11 @@ export async function POST(request: NextRequest) {
         mcpClient = await createMCPClient(accessToken)
         const tools = await getAnthropicTools(mcpClient)
 
-        // Load sensitivity rules for data masking
-        const sensitivityRules = await loadSensitivityRules()
+        // Load masking rules
+        const [sensitivityRules, fieldRules] = await Promise.all([
+          loadSensitivityRules(),
+          loadSensitiveFieldRules(),
+        ])
 
         // Run the Claude tool call loop
         await runClaudeLoop({
@@ -120,7 +168,10 @@ export async function POST(request: NextRequest) {
           mcpClient,
           confirmationToken,
           onChunk: (text) => {
-            const masked = applyDataMasking(text, sensitivityRules)
+            // Apply role-based PII masking
+            let masked = applyDataMasking(text, sensitivityRules, user.role)
+            // Apply per-field sensitivity masking
+            masked = applyFieldMasking(masked, fieldRules, user.role)
             const data = JSON.stringify({ type: 'text', content: masked })
             controller.enqueue(encoder.encode(`data: ${data}\n\n`))
           },
@@ -141,7 +192,6 @@ export async function POST(request: NextRequest) {
           },
         })
       } catch (error) {
-        // Log only the message, never the full error object (may contain tokens/secrets)
         console.error(
           'Chat API error:',
           error instanceof Error ? error.message : 'Unknown error'

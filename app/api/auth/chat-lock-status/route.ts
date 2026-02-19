@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getUserFromRequest } from '@/lib/auth/session'
 import { verifyChatUnlockToken, PIN_UNLOCK_COOKIE, isPinLockedOut } from '@/lib/auth/pin'
+import { logSecurityEvent, getClientIp, getUserAgent } from '@/lib/security/audit-events'
 
 function parseCookieValue(request: NextRequest, name: string): string | undefined {
   const cookieHeader = request.headers.get('cookie') || ''
@@ -74,6 +75,15 @@ export async function POST(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+
+  await logSecurityEvent({
+    userId: user.id,
+    userEmail: user.email,
+    eventType: 'CHAT_LOCKED',
+    detail: 'Chat locked manually by user',
+    ipAddress: getClientIp(request),
+    userAgent: getUserAgent(request),
+  })
 
   const response = NextResponse.json({ success: true, locked: true })
   response.cookies.set(PIN_UNLOCK_COOKIE, '', {

@@ -3,6 +3,7 @@ import { getUserFromRequest } from '@/lib/auth/session'
 import { prisma } from '@/lib/db/prisma'
 import { UserRole } from '@prisma/client'
 import { checkRateLimit } from '@/lib/rate-limit'
+import { logSecurityEvent, getClientIp, getUserAgent } from '@/lib/security/audit-events'
 import { z } from 'zod'
 
 async function requireAdmin(request: NextRequest) {
@@ -132,6 +133,28 @@ export async function PUT(request: NextRequest) {
       chatPinLockedUntil: true,
     },
   })
+
+  // Log admin PIN actions
+  if (parsed.data.resetPin) {
+    await logSecurityEvent({
+      userId: parsed.data.userId,
+      userEmail: user.email,
+      eventType: 'PIN_RESET_BY_ADMIN',
+      detail: `PIN reset by admin ${auth.user.email}`,
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request),
+    })
+  }
+  if (parsed.data.unlockPin) {
+    await logSecurityEvent({
+      userId: parsed.data.userId,
+      userEmail: user.email,
+      eventType: 'PIN_UNLOCKED',
+      detail: `Account unlocked by admin ${auth.user.email}`,
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request),
+    })
+  }
 
   return NextResponse.json({
     user: {

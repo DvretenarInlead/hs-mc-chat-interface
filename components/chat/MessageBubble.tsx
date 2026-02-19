@@ -213,8 +213,16 @@ function renderInline(text: string): React.ReactNode {
   return parts.length === 1 ? parts[0] : <>{parts}</>
 }
 
+/**
+ * Detect masked/redacted patterns in content to apply copy protection.
+ */
+function containsMaskedContent(text: string): boolean {
+  return /\[RESTRICTED\]|\[REDACTED\]|\*{4,}/.test(text)
+}
+
 export default function MessageBubble({ role, content }: MessageBubbleProps) {
   const isUser = role === 'user'
+  const hasMasked = useMemo(() => !isUser && containsMaskedContent(content), [content, isUser])
   const rendered = useMemo(
     () => (isUser ? null : renderMarkdown(content)),
     [content, isUser]
@@ -229,7 +237,13 @@ export default function MessageBubble({ role, content }: MessageBubbleProps) {
             : 'bg-gray-100 text-gray-900 rounded-bl-md'
         }`}
       >
-        <div className="text-sm break-words leading-relaxed">
+        <div
+          className={`text-sm break-words leading-relaxed ${hasMasked ? 'select-none' : ''}`}
+          onCopy={hasMasked ? (e) => {
+            e.preventDefault()
+            e.clipboardData.setData('text/plain', 'Copying restricted content is not allowed.')
+          } : undefined}
+        >
           {isUser ? (
             <span className="whitespace-pre-wrap">{content}</span>
           ) : (

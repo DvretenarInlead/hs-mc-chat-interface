@@ -3,6 +3,7 @@ import { getUserFromRequest } from '@/lib/auth/session'
 import { prisma } from '@/lib/db/prisma'
 import { checkRateLimit } from '@/lib/rate-limit'
 import { validatePinFormat, hashPin, verifyPin } from '@/lib/auth/pin'
+import { logSecurityEvent, getClientIp, getUserAgent } from '@/lib/security/audit-events'
 import { z } from 'zod'
 
 const setPinSchema = z.object({
@@ -76,6 +77,15 @@ export async function POST(request: NextRequest) {
     },
   })
 
+  await logSecurityEvent({
+    userId: user.id,
+    userEmail: user.email,
+    eventType: user.chatPinHash ? 'PIN_CHANGED' : 'PIN_SET',
+    detail: user.chatPinHash ? 'Chat PIN changed' : 'Chat PIN set for the first time',
+    ipAddress: getClientIp(request),
+    userAgent: getUserAgent(request),
+  })
+
   return NextResponse.json({ success: true, message: 'Chat PIN set successfully' })
 }
 
@@ -139,6 +149,15 @@ export async function DELETE(request: NextRequest) {
       chatPinFailures: 0,
       chatPinLockedUntil: null,
     },
+  })
+
+  await logSecurityEvent({
+    userId: user.id,
+    userEmail: user.email,
+    eventType: 'PIN_REMOVED',
+    detail: 'Chat PIN removed by user',
+    ipAddress: getClientIp(request),
+    userAgent: getUserAgent(request),
   })
 
   return NextResponse.json({ success: true, message: 'Chat PIN removed' })

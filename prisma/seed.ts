@@ -174,6 +174,23 @@ async function main() {
   }
 
   console.log(`Seeded ${SENSITIVITY_RULES.length} sensitivity rules.`)
+
+  // Seed default data retention policy
+  console.log('Seeding default data retention policy...')
+
+  await prisma.dataRetentionPolicy.upsert({
+    where: { id: 'default_retention_policy' },
+    update: {},
+    create: {
+      id: 'default_retention_policy',
+      chatSessionMaxDays: 90,
+      auditLogMaxDays: 365,
+      securityEventMaxDays: 365,
+      isActive: true,
+    },
+  })
+
+  console.log('Seeded default data retention policy.')
 }
 
 main()

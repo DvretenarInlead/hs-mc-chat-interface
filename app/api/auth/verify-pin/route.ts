@@ -11,6 +11,7 @@ import {
   PIN_UNLOCK_DURATION,
   PIN_MAX_FAILURES,
 } from '@/lib/auth/pin'
+import { logSecurityEvent, getClientIp, getUserAgent } from '@/lib/security/audit-events'
 import { z } from 'zod'
 
 const verifyPinSchema = z.object({
@@ -60,12 +61,32 @@ export async function POST(request: NextRequest) {
 
   const isValid = verifyPin(parsed.data.pin, user.chatPinHash)
 
+  const clientIp = getClientIp(request)
+  const ua = getUserAgent(request)
+
   if (!isValid) {
     const newFailures = user.chatPinFailures + 1
     const updateData: Record<string, unknown> = { chatPinFailures: newFailures }
 
     if (newFailures >= PIN_MAX_FAILURES) {
       updateData.chatPinLockedUntil = getPinLockoutExpiry()
+      await logSecurityEvent({
+        userId: user.id,
+        userEmail: user.email,
+        eventType: 'PIN_LOCKED_OUT',
+        detail: `User locked out after ${PIN_MAX_FAILURES} failed PIN attempts`,
+        ipAddress: clientIp,
+        userAgent: ua,
+      })
+    } else {
+      await logSecurityEvent({
+        userId: user.id,
+        userEmail: user.email,
+        eventType: 'PIN_FAILED',
+        detail: `Failed PIN attempt (${newFailures}/${PIN_MAX_FAILURES})`,
+        ipAddress: clientIp,
+        userAgent: ua,
+      })
     }
 
     await prisma.user.update({
@@ -90,6 +111,15 @@ export async function POST(request: NextRequest) {
   await prisma.user.update({
     where: { id: user.id },
     data: { chatPinFailures: 0, chatPinLockedUntil: null },
+  })
+
+  await logSecurityEvent({
+    userId: user.id,
+    userEmail: user.email,
+    eventType: 'PIN_VERIFIED',
+    detail: 'Chat PIN verified successfully',
+    ipAddress: clientIp,
+    userAgent: ua,
   })
 
   const unlockToken = await createChatUnlockToken(user.id)

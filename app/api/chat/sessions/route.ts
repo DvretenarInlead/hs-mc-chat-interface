@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getUserFromRequest } from '@/lib/auth/session'
 import { prisma } from '@/lib/db/prisma'
 import { Prisma } from '@prisma/client'
+import { encryptChatMessages, decryptChatMessages } from '@/lib/security/chat-encryption'
 import { z } from 'zod'
 
 // GET — list user's chat sessions (sidebar)
@@ -103,7 +104,11 @@ export async function PUT(request: NextRequest) {
 
   const data: Record<string, unknown> = {}
   if (title) data.title = title
-  if (messages) data.messages = messages as Prisma.InputJsonValue
+  if (messages) {
+    // Encrypt messages at rest
+    data.messages = encryptChatMessages(messages)
+    data.encrypted = true
+  }
 
   const session = await prisma.chatSession.update({
     where: { id },
