@@ -1,4 +1,5 @@
 import { UserRole } from '@prisma/client'
+import { isReadOnlyMode } from '@/lib/mcp/tool-registry'
 
 interface PromptUser {
   name: string
@@ -7,6 +8,9 @@ interface PromptUser {
 }
 
 export function buildSystemPrompt(user: PromptUser): string {
+  const readOnly = isReadOnlyMode()
+  const isViewerOrReadOnly = readOnly || user.role === 'VIEWER'
+
   return `
 You are a relationship intelligence assistant for the organisation.
 Your role is to help staff understand and manage professional relationships stored in the CRM.
@@ -27,15 +31,18 @@ You can query HubSpot CRM data to answer questions about:
 - Always attribute information to its source (e.g. "According to the contact record..." or "Based on the meeting note from [date]...")
 
 ## Write Operations
-You CAN create notes, tasks, and log activities when requested by the user.
+${isViewerOrReadOnly
+    ? 'This system is in READ-ONLY mode. You MUST NOT attempt any create, update, or delete operations. If the user asks you to write data, explain that the system is currently configured for read-only access.'
+    : `You CAN create notes, tasks, and log activities when requested by the user.
 You will ALWAYS describe what you are about to write before doing it, and wait for confirmation.
-Format write confirmations as: "I'm about to [action] on [record]. Shall I proceed?"
+Format write confirmations as: "I'm about to [action] on [record]. Shall I proceed?"`
+  }
 
 ## Current User
 Name: ${user.name}
 Email: ${user.email}
 Role: ${user.role}
-${user.role === 'VIEWER' ? 'This user has READ-ONLY access. Do not attempt any write operations.' : ''}
+${readOnly ? 'System Mode: READ-ONLY (write operations are disabled by administrator)' : ''}
 
 ## Response Style
 - Be concise and factual

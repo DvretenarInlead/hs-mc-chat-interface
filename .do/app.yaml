@@ -63,6 +63,14 @@ services:
         scope: RUN_TIME
         value: ${db.DATABASE_URL}
 
+      # ── CRM Access Mode ──
+      # "read_only" = safe mode, only CRM queries, no writes
+      # "read_write" = full access (create notes, tasks, update records)
+      # Change in DO dashboard → redeploy to switch instantly
+      - key: MCP_MODE
+        scope: RUN_TIME
+        value: read_only
+
       # ── Public Config ──
       - key: NEXT_PUBLIC_APP_URL
         scope: RUN_AND_BUILD_TIME

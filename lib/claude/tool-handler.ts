@@ -6,6 +6,7 @@ import { getAnthropicClient } from './client'
 import { buildSystemPrompt } from './system-prompt'
 import { evaluateGovernanceRule, isWriteOperation } from '@/lib/governance/rules'
 import { createAuditLog, updateAuditLogStatus, classifyToolAction } from '@/lib/db/audit'
+import { isReadOnlyMode } from '@/lib/mcp/tool-registry'
 import type { AnthropicTool } from '@/lib/mcp/tool-registry'
 
 interface ChatMessage {
@@ -165,6 +166,26 @@ export async function runClaudeLoop({
 
     for (const toolUse of toolUseBlocks) {
       const toolInput = toolUse.input as Record<string, unknown>
+
+      // Hard block: if MCP_MODE=read_only, reject any write tool at execution time
+      if (isReadOnlyMode() && isWriteOperation(toolUse.name)) {
+        await createAuditLog({
+          userId: user.id,
+          userEmail: user.email,
+          action: classifyToolAction(toolUse.name),
+          toolName: toolUse.name,
+          inputSummary: JSON.stringify(toolInput).slice(0, 500),
+          status: LogStatus.BLOCKED,
+        })
+
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: toolUse.id,
+          content: 'Write operations are disabled. The system is in read-only mode.',
+          is_error: true,
+        })
+        continue
+      }
 
       // Check governance rules for write operations
       if (isWriteOperation(toolUse.name)) {
