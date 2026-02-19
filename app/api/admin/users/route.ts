@@ -29,24 +29,28 @@ export async function GET(request: NextRequest) {
       email: true,
       name: true,
       role: true,
-      hubspotPortalId: true,
+      portalId: true,
       chatPinRequired: true,
       chatPinHash: true,
       chatPinLockedUntil: true,
       chatPinFailures: true,
       createdAt: true,
       updatedAt: true,
+      portal: {
+        select: { id: true, name: true, hubspotPortalId: true },
+      },
     },
     orderBy: { createdAt: 'desc' },
   })
 
-  // Don't expose actual hash — just whether PIN is set
   const sanitizedUsers = users.map((u) => ({
     id: u.id,
     email: u.email,
     name: u.name,
     role: u.role,
-    hubspotPortalId: u.hubspotPortalId,
+    portalId: u.portalId,
+    portalName: u.portal?.name ?? null,
+    hubspotPortalId: u.portal?.hubspotPortalId ?? null,
     chatPinRequired: u.chatPinRequired,
     hasChatPin: !!u.chatPinHash,
     chatPinLockedUntil: u.chatPinLockedUntil,
@@ -61,6 +65,7 @@ export async function GET(request: NextRequest) {
 const updateUserSchema = z.object({
   userId: z.string().min(1).max(100),
   role: z.nativeEnum(UserRole).optional(),
+  portalId: z.string().max(100).nullable().optional(),
   chatPinRequired: z.boolean().optional(),
   resetPin: z.boolean().optional(),
   unlockPin: z.boolean().optional(),
@@ -101,11 +106,14 @@ export async function PUT(request: NextRequest) {
     updateData.role = parsed.data.role
   }
 
+  if (parsed.data.portalId !== undefined) {
+    updateData.portalId = parsed.data.portalId
+  }
+
   if (parsed.data.chatPinRequired !== undefined) {
     updateData.chatPinRequired = parsed.data.chatPinRequired
   }
 
-  // Admin can reset a user's PIN (clears hash, forces re-setup)
   if (parsed.data.resetPin) {
     updateData.chatPinHash = null
     updateData.chatPinSetAt = null
@@ -113,7 +121,6 @@ export async function PUT(request: NextRequest) {
     updateData.chatPinLockedUntil = null
   }
 
-  // Admin can unlock a locked-out user
   if (parsed.data.unlockPin) {
     updateData.chatPinFailures = 0
     updateData.chatPinLockedUntil = null
@@ -127,6 +134,7 @@ export async function PUT(request: NextRequest) {
       email: true,
       name: true,
       role: true,
+      portalId: true,
       chatPinRequired: true,
       chatPinHash: true,
       chatPinFailures: true,
@@ -134,7 +142,6 @@ export async function PUT(request: NextRequest) {
     },
   })
 
-  // Log admin PIN actions
   if (parsed.data.resetPin) {
     await logSecurityEvent({
       userId: parsed.data.userId,

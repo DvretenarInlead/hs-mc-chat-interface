@@ -92,6 +92,22 @@ const DEFAULT_RULES = [
 ]
 
 async function main() {
+  // Seed admin user (user 0)
+  console.log('Seeding admin user...')
+  await prisma.user.upsert({
+    where: { email: 'darian@plusyourbusiness.com' },
+    update: {
+      role: UserRole.ADMIN,
+    },
+    create: {
+      email: 'darian@plusyourbusiness.com',
+      name: 'Darian',
+      role: UserRole.ADMIN,
+    },
+  })
+  console.log('Admin user seeded: darian@plusyourbusiness.com')
+
+  // Seed default governance rules
   console.log('Seeding default governance rules...')
 
   for (const rule of DEFAULT_RULES) {

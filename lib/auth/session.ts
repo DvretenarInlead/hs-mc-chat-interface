@@ -57,7 +57,6 @@ export async function getSessionFromCookie(): Promise<{ user: User } | null> {
 
     if (!userId) return null
 
-    // Verify session exists in DB and hasn't expired
     const session = await prisma.session.findFirst({
       where: {
         userId,
@@ -76,7 +75,6 @@ export async function getSessionFromCookie(): Promise<{ user: User } | null> {
 }
 
 export async function getUserFromRequest(req: Request): Promise<User | null> {
-  // Try to get the session token from the cookie header
   const cookieHeader = req.headers.get('cookie') || ''
   const cookies = parseCookies(cookieHeader)
   const token = cookies[SESSION_COOKIE_NAME]
@@ -117,13 +115,12 @@ function parseCookies(cookieHeader: string): Record<string, string> {
     const name = cookie.slice(0, eqIndex).trim()
     const value = cookie.slice(eqIndex + 1).trim()
 
-    if (!name || name.length > 256) return // Reject oversized names
+    if (!name || name.length > 256) return
 
-    // Decode percent-encoded values per RFC 6265
     try {
       cookies[name] = decodeURIComponent(value)
     } catch {
-      cookies[name] = value // Fallback to raw value if decoding fails
+      cookies[name] = value
     }
   })
   return cookies
@@ -139,33 +136,37 @@ export async function clearSessionCookie() {
 }
 
 /**
- * Get user's decrypted HubSpot access token, refreshing if needed.
- * Uses optimistic locking to prevent concurrent refresh race conditions.
+ * Get decrypted HubSpot access token from the user's assigned portal.
+ * Auto-refreshes if the token is about to expire.
  */
 export async function getDecryptedToken(user: User): Promise<string> {
-  // Check if token is about to expire (within 5 minutes)
+  if (!user.portalId) {
+    throw new Error('No HubSpot portal assigned. Ask an admin to assign you to a portal.')
+  }
+
+  const portal = await prisma.portal.findUnique({ where: { id: user.portalId } })
+  if (!portal) {
+    throw new Error('Assigned portal not found.')
+  }
+
   const fiveMinutesFromNow = new Date(Date.now() + 5 * 60 * 1000)
 
-  if (user.tokenExpiresAt < fiveMinutesFromNow) {
-    // Re-read the user to check if another request already refreshed
-    const freshUser = await prisma.user.findUnique({ where: { id: user.id } })
-    if (!freshUser) throw new Error('User not found')
+  if (portal.tokenExpiresAt < fiveMinutesFromNow) {
+    const freshPortal = await prisma.portal.findUnique({ where: { id: portal.id } })
+    if (!freshPortal) throw new Error('Portal not found')
 
-    // If another request already refreshed, use the new token
-    if (freshUser.tokenExpiresAt >= fiveMinutesFromNow) {
-      return decrypt(freshUser.accessToken)
+    if (freshPortal.tokenExpiresAt >= fiveMinutesFromNow) {
+      return decrypt(freshPortal.accessToken)
     }
 
-    // Refresh the token
-    const decryptedRefresh = decrypt(freshUser.refreshToken)
+    const decryptedRefresh = decrypt(freshPortal.refreshToken)
     const newTokens = await refreshAccessToken(decryptedRefresh)
 
-    // Update user record with optimistic lock (only if tokenExpiresAt hasn't changed)
     const expiresAt = new Date(Date.now() + newTokens.expires_in * 1000)
-    const updated = await prisma.user.updateMany({
+    const updated = await prisma.portal.updateMany({
       where: {
-        id: user.id,
-        tokenExpiresAt: freshUser.tokenExpiresAt, // Optimistic lock
+        id: portal.id,
+        tokenExpiresAt: freshPortal.tokenExpiresAt,
       },
       data: {
         accessToken: encrypt(newTokens.access_token),
@@ -174,15 +175,14 @@ export async function getDecryptedToken(user: User): Promise<string> {
       },
     })
 
-    // If update count is 0, another request won the race — re-read
     if (updated.count === 0) {
-      const raceUser = await prisma.user.findUnique({ where: { id: user.id } })
-      if (!raceUser) throw new Error('User not found')
-      return decrypt(raceUser.accessToken)
+      const racePortal = await prisma.portal.findUnique({ where: { id: portal.id } })
+      if (!racePortal) throw new Error('Portal not found')
+      return decrypt(racePortal.accessToken)
     }
 
     return newTokens.access_token
   }
 
-  return decrypt(user.accessToken)
+  return decrypt(portal.accessToken)
 }

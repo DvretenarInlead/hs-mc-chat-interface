@@ -17,10 +17,7 @@ function generateRequestId(): string {
 }
 
 function addSecurityHeaders(response: NextResponse, requestId: string): NextResponse {
-  // Request tracing
   response.headers.set('X-Request-Id', requestId)
-
-  // Security headers
   response.headers.set('X-Content-Type-Options', 'nosniff')
   response.headers.set('X-Frame-Options', 'DENY')
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
@@ -54,8 +51,21 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
   const requestId = generateRequestId()
 
-  // Check for session cookie
   const sessionToken = request.cookies.get(SESSION_COOKIE_NAME)?.value
+
+  // Public auth routes — no session required
+  const isPublicAuthRoute =
+    pathname === '/login' ||
+    pathname === '/register' ||
+    pathname.startsWith('/api/auth/register') ||
+    pathname.startsWith('/api/auth/otp') ||
+    pathname.startsWith('/api/auth/hubspot') ||
+    pathname.startsWith('/api/auth/callback') ||
+    pathname.startsWith('/api/auth/logout')
+
+  if (isPublicAuthRoute) {
+    return addSecurityHeaders(NextResponse.next(), requestId)
+  }
 
   // Routes that require authentication
   const isProtectedRoute =
@@ -97,13 +107,11 @@ export async function middleware(request: NextRequest) {
       throw new Error('Invalid session')
     }
 
-    // Attach userId and requestId to request headers for downstream use
     const response = addSecurityHeaders(NextResponse.next(), requestId)
     response.headers.set('x-user-id', userId)
     response.headers.set('x-request-id', requestId)
     return response
   } catch {
-    // Invalid or expired token
     if (pathname.startsWith('/api/')) {
       return addSecurityHeaders(
         NextResponse.json({ error: 'Session expired' }, { status: 401 }),
@@ -122,7 +130,9 @@ export const config = {
     '/api/chat/:path*',
     '/api/mcp/:path*',
     '/api/admin/:path*',
+    '/api/auth/:path*',
     '/login',
+    '/register',
     '/',
   ],
 }

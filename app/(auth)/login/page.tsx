@@ -1,41 +1,90 @@
 'use client'
 
-import { useSearchParams } from 'next/navigation'
-import { Suspense } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
+import { Suspense, useState } from 'react'
+import Link from 'next/link'
 
 function LoginContent() {
   const searchParams = useSearchParams()
+  const router = useRouter()
   const error = searchParams.get('error')
 
+  const [email, setEmail] = useState('')
+  const [code, setCode] = useState('')
+  const [step, setStep] = useState<'email' | 'code'>('email')
+  const [loading, setLoading] = useState(false)
+  const [message, setMessage] = useState('')
+  const [errorMsg, setErrorMsg] = useState('')
+
   const errorMessages: Record<string, string> = {
-    oauth_error: 'HubSpot denied the authorization request. Please try again.',
-    no_code: 'No authorization code received from HubSpot. Please try again.',
-    invalid_state: 'Session expired or invalid request. Please try again.',
+    oauth_error: 'HubSpot denied the authorization request.',
     auth_failed: 'Authentication failed. Please try again.',
-    token_exchange_failed: 'Failed to exchange token with HubSpot. The redirect URI may be misconfigured — check HUBSPOT_REDIRECT_URI.',
-    user_info_failed: 'Connected to HubSpot but failed to retrieve your user info.',
-    encryption_failed: 'Server config error: TOKEN_ENCRYPTION_KEY may be missing or invalid.',
-    db_upsert_failed: 'Database error — could not save your account. Check DATABASE_URL and run migrations.',
-    session_failed: 'Could not create session. Check SESSION_SECRET is set.',
+    session_expired: 'Your session has expired. Please sign in again.',
+  }
+
+  const handleRequestOtp = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    setErrorMsg('')
+    setMessage('')
+
+    try {
+      const res = await fetch('/api/auth/otp/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        setErrorMsg(data.error || 'Failed to send code.')
+        return
+      }
+
+      setStep('code')
+      setMessage('Check your email for a verification code.')
+    } catch {
+      setErrorMsg('Network error. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    setErrorMsg('')
+
+    try {
+      const res = await fetch('/api/auth/otp/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code }),
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        setErrorMsg(data.error || 'Invalid code.')
+        return
+      }
+
+      router.push('/chat')
+    } catch {
+      setErrorMsg('Network error. Please try again.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="max-w-md w-full">
+      <div className="max-w-md w-full px-4">
         <div className="text-center mb-8">
           <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <svg
-              className="w-8 h-8 text-white"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
-              />
+            <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
             </svg>
           </div>
           <h1 className="text-2xl font-bold text-gray-900">
@@ -46,26 +95,89 @@ function LoginContent() {
           </p>
         </div>
 
-        {error && (
+        {(error || errorMsg) && (
           <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-            {errorMessages[error] || 'An error occurred. Please try again.'}
+            {errorMsg || errorMessages[error!] || 'An error occurred. Please try again.'}
+          </div>
+        )}
+
+        {message && (
+          <div className="mb-4 rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-700">
+            {message}
           </div>
         )}
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
-          <a
-            href="/api/auth/hubspot"
-            className="flex items-center justify-center gap-3 w-full rounded-lg bg-[#ff7a59] text-white px-6 py-3 font-medium hover:bg-[#ff5c35] transition-colors"
-          >
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M18.164 7.93V5.084a2.198 2.198 0 001.267-1.984v-.066A2.2 2.2 0 0017.23.833h-.066a2.2 2.2 0 00-2.2 2.2v.067c0 .87.513 1.617 1.25 1.971v2.86a5.884 5.884 0 00-2.627 1.476l-6.95-5.41a2.635 2.635 0 00.076-.612A2.62 2.62 0 004.093.762a2.62 2.62 0 00-2.62 2.622 2.62 2.62 0 002.62 2.622c.47 0 .91-.13 1.29-.349l6.833 5.323a5.9 5.9 0 00-.483 2.343c0 .866.192 1.686.528 2.428l-2.065 2.065a2.07 2.07 0 00-.602-.094 2.084 2.084 0 100 4.168 2.084 2.084 0 002.084-2.084c0-.213-.04-.417-.094-.613l2.012-2.012a5.882 5.882 0 003.607 1.232 5.9 5.9 0 005.9-5.9 5.9 5.9 0 00-5.042-5.832z" />
-            </svg>
-            Sign in with HubSpot
-          </a>
+          {step === 'email' ? (
+            <form onSubmit={handleRequestOtp}>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Email address
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@company.com"
+                required
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+              />
+              <button
+                type="submit"
+                disabled={loading || !email}
+                className="mt-4 w-full rounded-lg bg-blue-600 text-white px-6 py-3 font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? 'Sending...' : 'Send verification code'}
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleVerifyOtp}>
+              <p className="text-sm text-gray-600 mb-4">
+                We sent a code to <strong>{email}</strong>
+              </p>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Verification code
+              </label>
+              <input
+                type="text"
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="000000"
+                required
+                maxLength={6}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm text-center tracking-[0.3em] font-mono text-lg focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none"
+              />
+              <button
+                type="submit"
+                disabled={loading || code.length !== 6}
+                className="mt-4 w-full rounded-lg bg-blue-600 text-white px-6 py-3 font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? 'Verifying...' : 'Sign in'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setStep('email')
+                  setCode('')
+                  setMessage('')
+                  setErrorMsg('')
+                }}
+                className="mt-2 w-full text-sm text-gray-500 hover:text-gray-700"
+              >
+                Use a different email
+              </button>
+            </form>
+          )}
 
-          <p className="text-center text-xs text-gray-400 mt-4">
-            You&apos;ll be redirected to HubSpot to sign in with your account.
-          </p>
+          <div className="mt-6 pt-4 border-t border-gray-100 text-center">
+            <p className="text-sm text-gray-500">
+              Don&apos;t have an account?{' '}
+              <Link href="/register" className="text-blue-600 hover:text-blue-700 font-medium">
+                Create one
+              </Link>
+            </p>
+          </div>
         </div>
       </div>
     </div>

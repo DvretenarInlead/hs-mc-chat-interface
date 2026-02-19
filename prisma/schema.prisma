@@ -10,26 +10,51 @@ datasource db {
 
 model User {
   id              String     @id @default(cuid())
-  hubspotUserId   String     @unique
   email           String     @unique
   name            String
-  hubspotPortalId String
   role            UserRole   @default(VIEWER)
-  accessToken     String     // HubSpot access token (encrypted at rest)
-  refreshToken    String     // HubSpot refresh token (encrypted at rest)
-  tokenExpiresAt  DateTime
-  chatPinHash     String?    // PBKDF2-hashed chat access PIN
-  chatPinRequired Boolean    @default(false) // Whether PIN is required to access chat
-  chatPinSetAt    DateTime?  // When the PIN was last set/changed
-  chatPinFailures Int        @default(0) // Consecutive failed PIN attempts
-  chatPinLockedUntil DateTime? // Lockout after too many failures
+  portalId        String?    // Assigned HubSpot portal (set by admin)
+  chatPinHash     String?
+  chatPinRequired Boolean    @default(false)
+  chatPinSetAt    DateTime?
+  chatPinFailures Int        @default(0)
+  chatPinLockedUntil DateTime?
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
   sessions        Session[]
   auditLogs       AuditLog[]
   chatSessions    ChatSession[]
+  portal          Portal?    @relation(fields: [portalId], references: [id])
 
   @@map("users")
+}
+
+model Portal {
+  id              String   @id @default(cuid())
+  hubspotPortalId String   @unique
+  name            String
+  accessToken     String   // Encrypted HubSpot access token
+  refreshToken    String   // Encrypted HubSpot refresh token
+  tokenExpiresAt  DateTime
+  connectedById   String   // userId of admin who connected
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  users           User[]
+
+  @@map("portals")
+}
+
+model OtpCode {
+  id        String   @id @default(cuid())
+  email     String
+  code      String
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@map("otp_codes")
 }
 
 model Session {
@@ -67,8 +92,8 @@ model ChatSession {
   id        String   @id @default(cuid())
   userId    String
   title     String   @default("New chat")
-  messages  Json     @default("[]")  // Encrypted JSON of chat messages
-  encrypted Boolean  @default(false) // Whether messages field is encrypted
+  messages  Json     @default("[]")
+  encrypted Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -122,11 +147,11 @@ model SensitivityRule {
   id          String   @id @default(cuid())
   name        String
   description String?
-  pattern     String   // Regex pattern to detect sensitive data
+  pattern     String
   category    SensitivityCategory
   maskStyle   MaskStyle @default(FULL)
   isActive    Boolean  @default(true)
-  isBuiltIn   Boolean  @default(false) // Built-in rules cannot be deleted
+  isBuiltIn   Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -143,15 +168,15 @@ enum SensitivityCategory {
 }
 
 enum MaskStyle {
-  FULL      // ********
-  PARTIAL   // jo***@***.com
-  REDACT    // [REDACTED]
+  FULL
+  PARTIAL
+  REDACT
 }
 
 model IpAllowlistEntry {
   id          String   @id @default(cuid())
-  cidr        String   // IP or CIDR range (e.g. "10.0.0.0/24" or "192.168.1.1")
-  label       String?  // Description (e.g. "Office VPN")
+  cidr        String
+  label       String?
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -164,10 +189,10 @@ model SecurityEvent {
   userId      String?
   userEmail   String?
   eventType   SecurityEventType
-  detail      String            // Human-readable description
+  detail      String
   ipAddress   String?
   userAgent   String?
-  metadata    Json?             // Additional structured data
+  metadata    Json?
   createdAt   DateTime          @default(now())
 
   @@index([userId])
@@ -191,15 +216,21 @@ enum SecurityEventType {
   SESSION_EXPIRED
   EXPORT_BLOCKED
   BULK_ACCESS_BLOCKED
+  OTP_REQUESTED
+  OTP_VERIFIED
+  OTP_FAILED
+  PORTAL_CONNECTED
+  PORTAL_DISCONNECTED
+  USER_REGISTERED
 }
 
 model SensitiveField {
   id          String       @id @default(cuid())
-  objectType  String       // e.g. "contacts", "companies", "deals"
-  fieldName   String       // HubSpot field name (e.g. "phone", "mobilephone")
-  label       String       // Display label (e.g. "Mobile Phone")
+  objectType  String
+  fieldName   String
+  label       String
   maskStyle   MaskStyle    @default(PARTIAL)
-  minRole     UserRole     @default(ADMIN) // Minimum role to see unmasked
+  minRole     UserRole     @default(ADMIN)
   isActive    Boolean      @default(true)
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
@@ -210,9 +241,9 @@ model SensitiveField {
 
 model DataRetentionPolicy {
   id                    String   @id @default(cuid())
-  chatSessionMaxDays    Int      @default(90)   // Delete chat sessions older than N days
-  auditLogMaxDays       Int      @default(365)  // Delete audit logs older than N days
-  securityEventMaxDays  Int      @default(365)  // Delete security events older than N days
+  chatSessionMaxDays    Int      @default(90)
+  auditLogMaxDays       Int      @default(365)
+  securityEventMaxDays  Int      @default(365)
   isActive              Boolean  @default(true)
   lastRunAt             DateTime?
   createdAt             DateTime @default(now())

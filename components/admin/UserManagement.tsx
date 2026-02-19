@@ -3,12 +3,19 @@
 import { useState, useEffect, useCallback } from 'react'
 import Badge from '@/components/ui/Badge'
 
+interface PortalInfo {
+  id: string
+  name: string
+  hubspotPortalId: string
+}
+
 interface UserRecord {
   id: string
   email: string
   name: string
   role: 'ADMIN' | 'POWER_USER' | 'VIEWER'
-  hubspotPortalId: string
+  portalId: string | null
+  portalName: string | null
   chatPinRequired: boolean
   hasChatPin: boolean
   chatPinFailures: number
@@ -24,16 +31,24 @@ const ROLE_BADGES: Record<string, 'error' | 'warning' | 'default'> = {
 
 export default function UserManagement() {
   const [users, setUsers] = useState<UserRecord[]>([])
+  const [portals, setPortals] = useState<PortalInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
 
-  const fetchUsers = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     try {
-      const res = await fetch('/api/admin/users')
-      if (!res.ok) throw new Error('Failed to fetch users')
-      const data = await res.json()
-      setUsers(data.users)
+      const [usersRes, portalsRes] = await Promise.all([
+        fetch('/api/admin/users'),
+        fetch('/api/admin/portals'),
+      ])
+      if (!usersRes.ok) throw new Error('Failed to fetch users')
+      const usersData = await usersRes.json()
+      setUsers(usersData.users)
+      if (portalsRes.ok) {
+        const portalsData = await portalsRes.json()
+        setPortals(portalsData.portals)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load users')
     } finally {
@@ -42,8 +57,8 @@ export default function UserManagement() {
   }, [])
 
   useEffect(() => {
-    fetchUsers()
-  }, [fetchUsers])
+    fetchData()
+  }, [fetchData])
 
   const updateUser = async (userId: string, data: Record<string, unknown>) => {
     setUpdatingId(userId)
@@ -58,7 +73,7 @@ export default function UserManagement() {
         const result = await res.json()
         throw new Error(result.error || 'Failed to update user')
       }
-      await fetchUsers()
+      await fetchData()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update')
     } finally {
@@ -84,7 +99,7 @@ export default function UserManagement() {
       <div className="mb-6">
         <h2 className="text-lg font-semibold text-gray-900">User Management</h2>
         <p className="text-sm text-gray-500 mt-1">
-          Manage user roles, permissions, and chat PIN security. Users are auto-provisioned on first HubSpot login.
+          Manage user roles, portal assignments, and chat PIN security.
         </p>
       </div>
 
@@ -103,6 +118,7 @@ export default function UserManagement() {
             <tr>
               <th className="text-left px-4 py-3 font-medium text-gray-600">User</th>
               <th className="text-left px-4 py-3 font-medium text-gray-600">Role</th>
+              <th className="text-left px-4 py-3 font-medium text-gray-600">Portal</th>
               <th className="text-left px-4 py-3 font-medium text-gray-600">Chat PIN</th>
               <th className="text-right px-4 py-3 font-medium text-gray-600">Actions</th>
             </tr>
@@ -124,6 +140,21 @@ export default function UserManagement() {
                     <option value="VIEWER">Viewer</option>
                     <option value="POWER_USER">Power User</option>
                     <option value="ADMIN">Admin</option>
+                  </select>
+                </td>
+                <td className="px-4 py-3">
+                  <select
+                    value={u.portalId || ''}
+                    disabled={updatingId === u.id}
+                    onChange={(e) => updateUser(u.id, { portalId: e.target.value || null })}
+                    className="rounded-lg border border-gray-300 px-2 py-1 text-sm disabled:opacity-50"
+                  >
+                    <option value="">No portal</option>
+                    {portals.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
                   </select>
                 </td>
                 <td className="px-4 py-3">
@@ -196,7 +227,7 @@ export default function UserManagement() {
 
       {users.length === 0 && (
         <p className="text-center text-gray-500 py-8">
-          No users found. Users will appear here after their first HubSpot login.
+          No users found. Users will appear here after they register.
         </p>
       )}
     </div>

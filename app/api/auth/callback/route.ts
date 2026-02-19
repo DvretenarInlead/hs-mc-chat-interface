@@ -4,24 +4,23 @@ import {
   getUserFromToken,
 } from '@/lib/auth/hubspot-oauth'
 import { encrypt } from '@/lib/auth/encryption'
-import { createSession } from '@/lib/auth/session'
+import { getUserFromRequest } from '@/lib/auth/session'
 import { prisma } from '@/lib/db/prisma'
+import { UserRole } from '@prisma/client'
+import { logSecurityEvent, getClientIp, getUserAgent } from '@/lib/security/audit-events'
 
 function getAppBaseUrl(request: NextRequest): string {
-  // Prefer NEXTAUTH_URL to avoid Docker internal 0.0.0.0:8080 URLs
   if (process.env.NEXTAUTH_URL) {
     return process.env.NEXTAUTH_URL
   }
   if (process.env.NEXT_PUBLIC_APP_URL) {
     return process.env.NEXT_PUBLIC_APP_URL
   }
-  // Fallback: try to reconstruct from forwarded headers (reverse proxy)
   const proto = request.headers.get('x-forwarded-proto') || 'https'
   const host = request.headers.get('x-forwarded-host') || request.headers.get('host')
   if (host && !host.includes('0.0.0.0')) {
     return `${proto}://${host}`
   }
-  // Last resort: use request.url
   return new URL(request.url).origin
 }
 
@@ -41,32 +40,38 @@ export async function GET(request: NextRequest) {
   // Check for OAuth errors from HubSpot
   if (error) {
     console.error('[OAuth] HubSpot returned error:', error, searchParams.get('error_description'))
-    return redirectWithCleanup(request, '/login?error=oauth_error')
+    return redirectWithCleanup(request, '/admin/portals?error=oauth_error')
   }
 
   if (!code) {
     console.error('[OAuth] No authorization code in callback')
-    return redirectWithCleanup(request, '/login?error=no_code')
+    return redirectWithCleanup(request, '/admin/portals?error=no_code')
   }
 
   // Verify CSRF state
   const storedState = request.cookies.get('hubspot_oauth_state')?.value
   if (!state || !storedState || state !== storedState) {
-    console.error('[OAuth] State mismatch:', { hasState: !!state, hasStoredState: !!storedState, match: state === storedState })
-    return redirectWithCleanup(request, '/login?error=invalid_state')
+    console.error('[OAuth] State mismatch')
+    return redirectWithCleanup(request, '/admin/portals?error=invalid_state')
   }
 
-  // Step-by-step with granular error handling
+  // Verify the current user is an admin
+  const currentUser = await getUserFromRequest(request)
+  if (!currentUser || currentUser.role !== UserRole.ADMIN) {
+    console.error('[OAuth] Non-admin attempted portal connection')
+    return redirectWithCleanup(request, '/admin/portals?error=forbidden')
+  }
+
   let step = 'token_exchange'
   try {
     // Step 1: Exchange code for tokens
     const tokens = await exchangeCodeForTokens(code)
     console.log('[OAuth] Token exchange successful')
 
-    // Step 2: Get user identity from HubSpot
+    // Step 2: Get portal info from HubSpot
     step = 'user_info'
-    const hubspotUser = await getUserFromToken(tokens.access_token)
-    console.log('[OAuth] Got user info:', { email: hubspotUser.user, hubId: hubspotUser.hub_id })
+    const hubspotInfo = await getUserFromToken(tokens.access_token)
+    console.log('[OAuth] Got portal info:', { hubId: hubspotInfo.hub_id })
 
     // Step 3: Encrypt tokens
     step = 'encryption'
@@ -74,60 +79,40 @@ export async function GET(request: NextRequest) {
     const encryptedRefresh = encrypt(tokens.refresh_token)
     const tokenExpiresAt = new Date(Date.now() + tokens.expires_in * 1000)
 
-    // Step 4: Create or update user in database
+    // Step 4: Create or update portal
     step = 'db_upsert'
-    const user = await prisma.user.upsert({
-      where: { hubspotUserId: String(hubspotUser.user_id) },
+    const portal = await prisma.portal.upsert({
+      where: { hubspotPortalId: String(hubspotInfo.hub_id) },
       update: {
-        email: hubspotUser.user,
         accessToken: encryptedAccess,
         refreshToken: encryptedRefresh,
         tokenExpiresAt,
-        hubspotPortalId: String(hubspotUser.hub_id),
+        connectedById: currentUser.id,
       },
       create: {
-        hubspotUserId: String(hubspotUser.user_id),
-        email: hubspotUser.user,
-        name: hubspotUser.user.split('@')[0],
-        hubspotPortalId: String(hubspotUser.hub_id),
+        hubspotPortalId: String(hubspotInfo.hub_id),
+        name: hubspotInfo.hub_domain || `Portal ${hubspotInfo.hub_id}`,
         accessToken: encryptedAccess,
         refreshToken: encryptedRefresh,
         tokenExpiresAt,
+        connectedById: currentUser.id,
       },
     })
-    console.log('[OAuth] User upserted:', user.id)
+    console.log('[OAuth] Portal upserted:', portal.id)
 
-    // Step 5: Create session
-    step = 'session'
-    const sessionToken = await createSession(user.id)
-    console.log('[OAuth] Session created')
-
-    // Redirect to chat with session cookie set on the response directly
-    // (Do NOT use cookies() from next/headers — it doesn't apply to custom NextResponse)
-    const response = redirectWithCleanup(request, '/chat')
-    response.cookies.set('ri_session', sessionToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 8 * 60 * 60,
-      path: '/',
+    await logSecurityEvent({
+      userId: currentUser.id,
+      userEmail: currentUser.email,
+      eventType: 'PORTAL_CONNECTED',
+      detail: `HubSpot portal ${hubspotInfo.hub_id} connected`,
+      ipAddress: getClientIp(request),
+      userAgent: getUserAgent(request),
     })
 
-    return response
+    return redirectWithCleanup(request, '/admin/portals?success=connected')
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : 'Unknown error'
     console.error(`[OAuth] Failed at step "${step}":`, errorMessage)
-    if (err instanceof Error && err.stack) {
-      console.error('[OAuth] Stack:', err.stack)
-    }
-    console.error('[OAuth] Config check:', {
-      hasClientId: !!process.env.HUBSPOT_CLIENT_ID,
-      hasClientSecret: !!process.env.HUBSPOT_CLIENT_SECRET,
-      redirectUri: process.env.HUBSPOT_REDIRECT_URI,
-      hasSessionSecret: !!process.env.SESSION_SECRET,
-      hasEncryptionKey: !!process.env.TOKEN_ENCRYPTION_KEY,
-      hasDatabaseUrl: !!process.env.DATABASE_URL,
-    })
-    return redirectWithCleanup(request, `/login?error=${step}_failed`)
+    return redirectWithCleanup(request, `/admin/portals?error=${step}_failed`)
   }
 }

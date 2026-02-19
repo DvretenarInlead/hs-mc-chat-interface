@@ -147,7 +147,17 @@ export async function POST(request: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        // Get decrypted HubSpot token (auto-refreshes if needed)
+        // Verify user has a portal assigned
+        if (!user.portalId) {
+          const data = JSON.stringify({
+            type: 'error',
+            content: 'No HubSpot portal assigned to your account. Ask an admin to assign you to a portal.',
+          })
+          controller.enqueue(encoder.encode(`data: ${data}\n\n`))
+          return
+        }
+
+        // Get decrypted HubSpot token from portal (auto-refreshes if needed)
         const accessToken = await getDecryptedToken(user)
 
         // Create MCP client
