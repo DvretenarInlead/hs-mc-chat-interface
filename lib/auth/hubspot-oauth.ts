@@ -9,9 +9,6 @@ const SCOPES = [
   'crm.objects.companies.read',
   'crm.objects.companies.write',
   'crm.objects.deals.read',
-  'crm.objects.notes.read',
-  'crm.objects.notes.write',
-  'crm.objects.tasks.write',
   'crm.schemas.contacts.read',
 ]
 
