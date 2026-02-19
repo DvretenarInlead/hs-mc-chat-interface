@@ -36,9 +36,7 @@ services:
       - key: HUBSPOT_REDIRECT_URI
         scope: RUN_TIME
         value: ${APP_URL}/api/auth/callback
-      - key: HUBSPOT_PRIVATE_APP_TOKEN
-        scope: RUN_TIME
-        type: SECRET
+      # No HUBSPOT_PRIVATE_APP_TOKEN needed — MCP uses per-user OAuth tokens
 
       # ── Anthropic ──
       - key: ANTHROPIC_API_KEY
