@@ -31,9 +31,7 @@ services:
       - key: HUBSPOT_REDIRECT_URI
         scope: RUN_TIME
         value: ${APP_URL}/api/auth/callback
-      - key: HUBSPOT_PRIVATE_APP_TOKEN
-        scope: RUN_TIME
-        type: SECRET
+      # No HUBSPOT_PRIVATE_APP_TOKEN needed — MCP uses per-user OAuth tokens
       - key: ANTHROPIC_API_KEY
         scope: RUN_TIME
         type: SECRET
@@ -49,6 +47,12 @@ services:
       - key: DATABASE_URL
         scope: RUN_TIME
         value: ${db.DATABASE_URL}
+      # ── CRM Access Mode ──
+      # "read_only" = safe mode, only CRM queries, no writes
+      # "read_write" = full access (create notes, tasks, update records)
+      - key: MCP_MODE
+        scope: RUN_TIME
+        value: read_only
       - key: NEXT_PUBLIC_APP_URL
         scope: RUN_AND_BUILD_TIME
         value: ${APP_URL}
