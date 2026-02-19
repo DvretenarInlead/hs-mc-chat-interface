@@ -24,6 +24,9 @@ ENV NODE_ENV=production
 ENV PORT=8080
 ENV HOSTNAME="0.0.0.0"
 
+# Prisma requires OpenSSL at runtime
+RUN apk add --no-cache openssl
+
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
