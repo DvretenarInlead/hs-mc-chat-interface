@@ -7,8 +7,27 @@ import { encrypt } from '@/lib/auth/encryption'
 import { createSession, setSessionCookie } from '@/lib/auth/session'
 import { prisma } from '@/lib/db/prisma'
 
+function getAppBaseUrl(request: NextRequest): string {
+  // Prefer NEXTAUTH_URL to avoid Docker internal 0.0.0.0:8080 URLs
+  if (process.env.NEXTAUTH_URL) {
+    return process.env.NEXTAUTH_URL
+  }
+  if (process.env.NEXT_PUBLIC_APP_URL) {
+    return process.env.NEXT_PUBLIC_APP_URL
+  }
+  // Fallback: try to reconstruct from forwarded headers (reverse proxy)
+  const proto = request.headers.get('x-forwarded-proto') || 'https'
+  const host = request.headers.get('x-forwarded-host') || request.headers.get('host')
+  if (host && !host.includes('0.0.0.0')) {
+    return `${proto}://${host}`
+  }
+  // Last resort: use request.url
+  return new URL(request.url).origin
+}
+
 function redirectWithCleanup(request: NextRequest, path: string): NextResponse {
-  const response = NextResponse.redirect(new URL(path, request.url))
+  const baseUrl = getAppBaseUrl(request)
+  const response = NextResponse.redirect(new URL(path, baseUrl))
   response.cookies.delete('hubspot_oauth_state')
   return response
 }
@@ -81,11 +100,17 @@ export async function GET(request: NextRequest) {
 
     return response
   } catch (err) {
-    // Log only the error message, not the full object (may contain tokens)
-    console.error(
-      'OAuth callback error:',
-      err instanceof Error ? err.message : 'Unknown error'
-    )
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error'
+    // Log detailed context for debugging (never log tokens)
+    console.error('OAuth callback error:', errorMessage)
+    console.error('OAuth debug context:', {
+      hasClientId: !!process.env.HUBSPOT_CLIENT_ID,
+      hasClientSecret: !!process.env.HUBSPOT_CLIENT_SECRET,
+      redirectUri: process.env.HUBSPOT_REDIRECT_URI,
+      hasSessionSecret: !!process.env.SESSION_SECRET,
+      hasEncryptionKey: !!process.env.TOKEN_ENCRYPTION_KEY,
+      hasDatabaseUrl: !!process.env.DATABASE_URL,
+    })
     return redirectWithCleanup(request, '/login?error=auth_failed')
   }
 }

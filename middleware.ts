@@ -35,6 +35,21 @@ function addSecurityHeaders(response: NextResponse, requestId: string): NextResp
   return response
 }
 
+function getAppBaseUrl(request: NextRequest): string {
+  if (process.env.NEXTAUTH_URL) {
+    return process.env.NEXTAUTH_URL
+  }
+  if (process.env.NEXT_PUBLIC_APP_URL) {
+    return process.env.NEXT_PUBLIC_APP_URL
+  }
+  const proto = request.headers.get('x-forwarded-proto') || 'https'
+  const host = request.headers.get('x-forwarded-host') || request.headers.get('host')
+  if (host && !host.includes('0.0.0.0')) {
+    return `${proto}://${host}`
+  }
+  return new URL(request.url).origin
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
   const requestId = generateRequestId()
@@ -61,7 +76,8 @@ export async function middleware(request: NextRequest) {
         requestId
       )
     }
-    return NextResponse.redirect(new URL('/login', request.url))
+    const baseUrl = getAppBaseUrl(request)
+    return NextResponse.redirect(new URL('/login', baseUrl))
   }
 
   // Verify the JWT
@@ -94,7 +110,8 @@ export async function middleware(request: NextRequest) {
         requestId
       )
     }
-    return NextResponse.redirect(new URL('/login', request.url))
+    const baseUrl = getAppBaseUrl(request)
+    return NextResponse.redirect(new URL('/login', baseUrl))
   }
 }
 
