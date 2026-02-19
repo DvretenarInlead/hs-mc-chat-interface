@@ -1,0 +1,99 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String     @id @default(cuid())
+  hubspotUserId   String     @unique
+  email           String     @unique
+  name            String
+  hubspotPortalId String
+  role            UserRole   @default(VIEWER)
+  accessToken     String     // HubSpot access token (encrypted at rest)
+  refreshToken    String     // HubSpot refresh token (encrypted at rest)
+  tokenExpiresAt  DateTime
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  sessions        Session[]
+  auditLogs       AuditLog[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model AuditLog {
+  id               String      @id @default(cuid())
+  userId           String
+  userEmail        String
+  action           AuditAction
+  toolName         String
+  inputSummary     String
+  outputSummary    String?
+  recordType       String?
+  recordId         String?
+  status           LogStatus   @default(PENDING)
+  requiresApproval Boolean     @default(false)
+  approvedBy       String?
+  approvedAt       DateTime?
+  createdAt        DateTime    @default(now())
+  user             User        @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
+}
+
+model GovernanceRule {
+  id          String     @id @default(cuid())
+  name        String
+  description String?
+  toolName    String
+  action      RuleAction
+  conditions  Json?
+  appliesTo   UserRole[]
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@map("governance_rules")
+}
+
+enum UserRole {
+  ADMIN
+  POWER_USER
+  VIEWER
+}
+
+enum AuditAction {
+  READ
+  CREATE
+  UPDATE
+  DELETE
+}
+
+enum RuleAction {
+  ALLOW
+  REQUIRE_CONFIRM
+  BLOCK
+}
+
+enum LogStatus {
+  PENDING
+  COMPLETED
+  APPROVED
+  REJECTED
+  BLOCKED
+}
