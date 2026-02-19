@@ -1,0 +1,78 @@
+# DigitalOcean App Platform spec
+# Deploy via: doctl apps create --spec .do/app.yaml
+# Or connect the GitHub repo in the DO App Platform dashboard.
+#
+# All secrets are managed via DigitalOcean App Platform Environment Variables.
+# Go to: App > Settings > App-Level Environment Variables to set them.
+# DATABASE_URL is auto-bound from the attached managed database.
+
+name: relationship-intelligence
+
+services:
+  - name: web
+    github:
+      repo: YOUR_GITHUB_ORG/hs-mc-chat-interface
+      branch: main
+      deploy_on_push: true
+    dockerfile_path: Dockerfile
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: professional-xs  # $12/mo — 1 vCPU, 1 GB RAM
+    health_check:
+      http_path: /api/health
+      initial_delay_seconds: 30
+      period_seconds: 30
+    routes:
+      - path: /
+    envs:
+      # ── HubSpot OAuth ──
+      # Set these as Secrets in DO App Settings
+      - key: HUBSPOT_CLIENT_ID
+        scope: RUN_TIME
+        type: SECRET
+      - key: HUBSPOT_CLIENT_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: HUBSPOT_REDIRECT_URI
+        scope: RUN_TIME
+        value: ${APP_URL}/api/auth/callback
+      - key: HUBSPOT_PRIVATE_APP_TOKEN
+        scope: RUN_TIME
+        type: SECRET
+
+      # ── Anthropic ──
+      - key: ANTHROPIC_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+
+      # ── Auth / Encryption ──
+      # Generate each with: openssl rand -hex 32
+      - key: SESSION_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: TOKEN_ENCRYPTION_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: NEXTAUTH_URL
+        scope: RUN_TIME
+        value: ${APP_URL}
+
+      # ── Database ──
+      # Auto-bound from attached managed PostgreSQL database component.
+      # The ${db.DATABASE_URL} binding auto-injects the full connection string
+      # with credentials — no manual secret management needed for DB.
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        value: ${db.DATABASE_URL}
+
+      # ── Public Config ──
+      - key: NEXT_PUBLIC_APP_URL
+        scope: RUN_AND_BUILD_TIME
+        value: ${APP_URL}
+
+databases:
+  - name: db
+    engine: PG
+    version: "16"
+    size: db-s-1vcpu-1gb  # $15/mo — 1 vCPU, 1 GB RAM, 10 GB disk
+    num_nodes: 1
