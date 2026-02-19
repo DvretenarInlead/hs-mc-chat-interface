@@ -1,10 +1,9 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/db/prisma'
 
-/**
- * Diagnostic endpoint to verify OAuth configuration.
- * Does NOT expose secrets — only reports whether each required value is set.
- */
+// Force dynamic rendering — never cache this at build time
+export const dynamic = 'force-dynamic'
+
 export async function GET() {
   const redirectUri = process.env.HUBSPOT_REDIRECT_URI || ''
 
