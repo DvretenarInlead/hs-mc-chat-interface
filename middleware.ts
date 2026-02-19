@@ -10,7 +10,17 @@ function getSessionSecret() {
   return new TextEncoder().encode(secret)
 }
 
-function addSecurityHeaders(response: NextResponse): NextResponse {
+function generateRequestId(): string {
+  const timestamp = Date.now().toString(36)
+  const random = Math.random().toString(36).slice(2, 8)
+  return `${timestamp}-${random}`
+}
+
+function addSecurityHeaders(response: NextResponse, requestId: string): NextResponse {
+  // Request tracing
+  response.headers.set('X-Request-Id', requestId)
+
+  // Security headers
   response.headers.set('X-Content-Type-Options', 'nosniff')
   response.headers.set('X-Frame-Options', 'DENY')
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
@@ -27,6 +37,7 @@ function addSecurityHeaders(response: NextResponse): NextResponse {
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
+  const requestId = generateRequestId()
 
   // Check for session cookie
   const sessionToken = request.cookies.get(SESSION_COOKIE_NAME)?.value
@@ -40,13 +51,14 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/api/admin')
 
   if (!isProtectedRoute) {
-    return addSecurityHeaders(NextResponse.next())
+    return addSecurityHeaders(NextResponse.next(), requestId)
   }
 
   if (!sessionToken) {
     if (pathname.startsWith('/api/')) {
       return addSecurityHeaders(
-        NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
+        requestId
       )
     }
     return NextResponse.redirect(new URL('/login', request.url))
@@ -56,7 +68,8 @@ export async function middleware(request: NextRequest) {
   const secret = getSessionSecret()
   if (!secret) {
     return addSecurityHeaders(
-      NextResponse.json({ error: 'Server configuration error' }, { status: 500 })
+      NextResponse.json({ error: 'Server configuration error' }, { status: 500 }),
+      requestId
     )
   }
 
@@ -68,15 +81,17 @@ export async function middleware(request: NextRequest) {
       throw new Error('Invalid session')
     }
 
-    // Attach userId to request headers for downstream use
-    const response = addSecurityHeaders(NextResponse.next())
+    // Attach userId and requestId to request headers for downstream use
+    const response = addSecurityHeaders(NextResponse.next(), requestId)
     response.headers.set('x-user-id', userId)
+    response.headers.set('x-request-id', requestId)
     return response
   } catch {
     // Invalid or expired token
     if (pathname.startsWith('/api/')) {
       return addSecurityHeaders(
-        NextResponse.json({ error: 'Session expired' }, { status: 401 })
+        NextResponse.json({ error: 'Session expired' }, { status: 401 }),
+        requestId
       )
     }
     return NextResponse.redirect(new URL('/login', request.url))
@@ -87,7 +102,7 @@ export const config = {
   matcher: [
     '/chat/:path*',
     '/admin/:path*',
-    '/api/chat',
+    '/api/chat/:path*',
     '/api/mcp/:path*',
     '/api/admin/:path*',
     '/login',

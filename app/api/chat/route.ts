@@ -4,9 +4,23 @@ import { createMCPClient, closeMCPClient } from '@/lib/mcp/client'
 import { getAnthropicTools } from '@/lib/mcp/tool-registry'
 import { runClaudeLoop } from '@/lib/claude/tool-handler'
 import { checkRateLimit } from '@/lib/rate-limit'
+import { z } from 'zod'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
+
+const chatRequestSchema = z.object({
+  messages: z
+    .array(
+      z.object({
+        role: z.enum(['user', 'assistant']),
+        content: z.string().min(1).max(10000),
+      })
+    )
+    .min(1)
+    .max(100),
+  confirmationToken: z.string().max(5000).optional(),
+})
 
 export async function POST(request: NextRequest) {
   // 1. Auth check
@@ -30,23 +44,27 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  // 3. Parse request body
-  let body: { messages: Array<{ role: string; content: string }>; confirmationToken?: string }
+  // 3. Parse and validate request body
+  let body: unknown
   try {
     body = await request.json()
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 })
   }
 
-  const { messages, confirmationToken } = body
-
-  if (!messages || !Array.isArray(messages) || messages.length === 0) {
-    return NextResponse.json({ error: 'Messages array is required' }, { status: 400 })
+  const parsed = chatRequestSchema.safeParse(body)
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: 'Validation error', details: parsed.error.flatten() },
+      { status: 400 }
+    )
   }
+
+  const { messages, confirmationToken } = parsed.data
 
   // 4. Sanitize user messages
   const sanitizedMessages = messages.map((m) => ({
-    role: m.role as 'user' | 'assistant',
+    role: m.role,
     content: sanitizeInput(m.content),
   }))
 

@@ -21,6 +21,7 @@ model User {
   updatedAt       DateTime   @updatedAt
   sessions        Session[]
   auditLogs       AuditLog[]
+  chatSessions    ChatSession[]
 
   @@map("users")
 }
@@ -54,6 +55,18 @@ model AuditLog {
   user             User        @relation(fields: [userId], references: [id])
 
   @@map("audit_logs")
+}
+
+model ChatSession {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String   @default("New chat")
+  messages  Json     @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("chat_sessions")
 }
 
 model GovernanceRule {
