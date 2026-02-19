@@ -1,17 +1,22 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'crypto'
+import { createCipheriv, createDecipheriv, randomBytes, pbkdf2Sync } from 'crypto'
 
 const ALGORITHM = 'aes-256-gcm'
 const IV_LENGTH = 16
-const TAG_LENGTH = 16
+const PBKDF2_ITERATIONS = 100_000
+const PBKDF2_SALT = 'ri-token-encryption-v1' // Static salt — key uniqueness comes from the secret
+
+let cachedKey: Buffer | null = null
 
 function getEncryptionKey(): Buffer {
-  const key = process.env.TOKEN_ENCRYPTION_KEY || process.env.SESSION_SECRET
+  if (cachedKey) return cachedKey
+
+  const key = process.env.TOKEN_ENCRYPTION_KEY
   if (!key) {
-    throw new Error('TOKEN_ENCRYPTION_KEY or SESSION_SECRET must be set')
+    throw new Error('TOKEN_ENCRYPTION_KEY must be set (32+ character random string)')
   }
-  // Derive a 32-byte key from the provided key
-  const crypto = require('crypto')
-  return crypto.createHash('sha256').update(key).digest()
+  // Derive a 32-byte key using PBKDF2 with SHA-512
+  cachedKey = pbkdf2Sync(key, PBKDF2_SALT, PBKDF2_ITERATIONS, 32, 'sha512')
+  return cachedKey
 }
 
 export function encrypt(plaintext: string): string {

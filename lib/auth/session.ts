@@ -108,10 +108,22 @@ export async function getUserFromRequest(req: Request): Promise<User | null> {
 
 function parseCookies(cookieHeader: string): Record<string, string> {
   const cookies: Record<string, string> = {}
+  if (!cookieHeader) return cookies
+
   cookieHeader.split(';').forEach((cookie) => {
-    const [name, ...rest] = cookie.trim().split('=')
-    if (name) {
-      cookies[name] = rest.join('=')
+    const eqIndex = cookie.indexOf('=')
+    if (eqIndex === -1) return
+
+    const name = cookie.slice(0, eqIndex).trim()
+    const value = cookie.slice(eqIndex + 1).trim()
+
+    if (!name || name.length > 256) return // Reject oversized names
+
+    // Decode percent-encoded values per RFC 6265
+    try {
+      cookies[name] = decodeURIComponent(value)
+    } catch {
+      cookies[name] = value // Fallback to raw value if decoding fails
     }
   })
   return cookies
@@ -128,26 +140,46 @@ export async function clearSessionCookie() {
 
 /**
  * Get user's decrypted HubSpot access token, refreshing if needed.
+ * Uses optimistic locking to prevent concurrent refresh race conditions.
  */
 export async function getDecryptedToken(user: User): Promise<string> {
   // Check if token is about to expire (within 5 minutes)
   const fiveMinutesFromNow = new Date(Date.now() + 5 * 60 * 1000)
 
   if (user.tokenExpiresAt < fiveMinutesFromNow) {
+    // Re-read the user to check if another request already refreshed
+    const freshUser = await prisma.user.findUnique({ where: { id: user.id } })
+    if (!freshUser) throw new Error('User not found')
+
+    // If another request already refreshed, use the new token
+    if (freshUser.tokenExpiresAt >= fiveMinutesFromNow) {
+      return decrypt(freshUser.accessToken)
+    }
+
     // Refresh the token
-    const decryptedRefresh = decrypt(user.refreshToken)
+    const decryptedRefresh = decrypt(freshUser.refreshToken)
     const newTokens = await refreshAccessToken(decryptedRefresh)
 
-    // Update user record with new tokens
+    // Update user record with optimistic lock (only if tokenExpiresAt hasn't changed)
     const expiresAt = new Date(Date.now() + newTokens.expires_in * 1000)
-    await prisma.user.update({
-      where: { id: user.id },
+    const updated = await prisma.user.updateMany({
+      where: {
+        id: user.id,
+        tokenExpiresAt: freshUser.tokenExpiresAt, // Optimistic lock
+      },
       data: {
         accessToken: encrypt(newTokens.access_token),
         refreshToken: encrypt(newTokens.refresh_token),
         tokenExpiresAt: expiresAt,
       },
     })
+
+    // If update count is 0, another request won the race — re-read
+    if (updated.count === 0) {
+      const raceUser = await prisma.user.findUnique({ where: { id: user.id } })
+      if (!raceUser) throw new Error('User not found')
+      return decrypt(raceUser.accessToken)
+    }
 
     return newTokens.access_token
   }

@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { User, RuleAction, LogStatus } from '@prisma/client'
+import { createHmac, timingSafeEqual } from 'crypto'
 import { getAnthropicClient } from './client'
 import { buildSystemPrompt } from './system-prompt'
 import { evaluateGovernanceRule, isWriteOperation } from '@/lib/governance/rules'
@@ -29,15 +30,42 @@ interface RunClaudeLoopParams {
   onDone: () => void
 }
 
-// Simple token for confirmation flow
+function getConfirmationSecret(): string {
+  const secret = process.env.SESSION_SECRET
+  if (!secret) throw new Error('SESSION_SECRET is required for confirmation tokens')
+  return secret
+}
+
+// HMAC-signed confirmation token to prevent forgery
 export function generateConfirmationToken(toolName: string, input: Record<string, unknown>): string {
   const payload = JSON.stringify({ tool: toolName, input, ts: Date.now() })
-  return Buffer.from(payload).toString('base64')
+  const encoded = Buffer.from(payload).toString('base64')
+  const signature = createHmac('sha256', getConfirmationSecret())
+    .update(encoded)
+    .digest('hex')
+  return `${encoded}.${signature}`
 }
 
 export function verifyConfirmationToken(token: string): { tool: string; input: Record<string, unknown> } | null {
   try {
-    const payload = JSON.parse(Buffer.from(token, 'base64').toString())
+    const dotIndex = token.lastIndexOf('.')
+    if (dotIndex === -1) return null
+
+    const encoded = token.slice(0, dotIndex)
+    const providedSig = token.slice(dotIndex + 1)
+
+    // Verify HMAC signature using timing-safe comparison
+    const expectedSig = createHmac('sha256', getConfirmationSecret())
+      .update(encoded)
+      .digest('hex')
+
+    const sigBuffer = Buffer.from(providedSig, 'hex')
+    const expectedBuffer = Buffer.from(expectedSig, 'hex')
+    if (sigBuffer.length !== expectedBuffer.length || !timingSafeEqual(sigBuffer, expectedBuffer)) {
+      return null
+    }
+
+    const payload = JSON.parse(Buffer.from(encoded, 'base64').toString())
     // Tokens expire after 5 minutes
     if (Date.now() - payload.ts > 5 * 60 * 1000) return null
     return { tool: payload.tool, input: payload.input }

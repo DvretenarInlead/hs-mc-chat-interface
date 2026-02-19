@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
       })),
     })
   } catch (error) {
-    console.error('MCP tools error:', error)
+    console.error('MCP tools error:', error instanceof Error ? error.message : 'Unknown error')
     return NextResponse.json(
       { error: 'Failed to connect to HubSpot. Please try again.' },
       { status: 502 }

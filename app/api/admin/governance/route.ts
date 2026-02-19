@@ -2,13 +2,18 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getUserFromRequest } from '@/lib/auth/session'
 import { prisma } from '@/lib/db/prisma'
 import { Prisma, RuleAction, UserRole } from '@prisma/client'
+import { checkRateLimit } from '@/lib/rate-limit'
 import { z } from 'zod'
 
-// Validate user is ADMIN
+// Validate user is ADMIN + rate limit
 async function requireAdmin(request: NextRequest) {
   const user = await getUserFromRequest(request)
   if (!user) return { error: 'Unauthorized', status: 401 }
   if (user.role !== UserRole.ADMIN) return { error: 'Forbidden', status: 403 }
+
+  const rateLimit = checkRateLimit(user.id)
+  if (!rateLimit.allowed) return { error: 'Too many requests', status: 429 }
+
   return { user }
 }
 
@@ -27,8 +32,8 @@ export async function GET(request: NextRequest) {
 
 const createRuleSchema = z.object({
   name: z.string().min(1).max(200),
-  description: z.string().optional(),
-  toolName: z.string().min(1),
+  description: z.string().max(1000).optional(),
+  toolName: z.string().min(1).max(200).regex(/^[a-zA-Z0-9_.-]+$/, 'Invalid tool name format'),
   action: z.nativeEnum(RuleAction),
   conditions: z.record(z.unknown()).optional(),
   appliesTo: z.array(z.nativeEnum(UserRole)).min(1),
@@ -81,7 +86,7 @@ export async function PUT(request: NextRequest) {
   }
 
   const updateSchema = createRuleSchema.extend({
-    id: z.string().min(1),
+    id: z.string().min(1).max(100),
   })
 
   const parsed = updateSchema.safeParse(body)
@@ -113,8 +118,8 @@ export async function DELETE(request: NextRequest) {
 
   const { searchParams } = new URL(request.url)
   const id = searchParams.get('id')
-  if (!id) {
-    return NextResponse.json({ error: 'Rule ID required' }, { status: 400 })
+  if (!id || id.length > 100) {
+    return NextResponse.json({ error: 'Valid rule ID required' }, { status: 400 })
   }
 
   await prisma.governanceRule.delete({ where: { id } })

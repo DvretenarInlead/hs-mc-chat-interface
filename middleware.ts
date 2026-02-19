@@ -10,6 +10,21 @@ function getSessionSecret() {
   return new TextEncoder().encode(secret)
 }
 
+function addSecurityHeaders(response: NextResponse): NextResponse {
+  response.headers.set('X-Content-Type-Options', 'nosniff')
+  response.headers.set('X-Frame-Options', 'DENY')
+  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
+  response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+  response.headers.set(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'"
+  )
+  if (process.env.NODE_ENV === 'production') {
+    response.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+  }
+  return response
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
@@ -25,12 +40,14 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith('/api/admin')
 
   if (!isProtectedRoute) {
-    return NextResponse.next()
+    return addSecurityHeaders(NextResponse.next())
   }
 
   if (!sessionToken) {
     if (pathname.startsWith('/api/')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return addSecurityHeaders(
+        NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      )
     }
     return NextResponse.redirect(new URL('/login', request.url))
   }
@@ -38,7 +55,9 @@ export async function middleware(request: NextRequest) {
   // Verify the JWT
   const secret = getSessionSecret()
   if (!secret) {
-    return NextResponse.json({ error: 'Server configuration error' }, { status: 500 })
+    return addSecurityHeaders(
+      NextResponse.json({ error: 'Server configuration error' }, { status: 500 })
+    )
   }
 
   try {
@@ -49,21 +68,16 @@ export async function middleware(request: NextRequest) {
       throw new Error('Invalid session')
     }
 
-    // For admin routes, we need to verify role
-    // This is a lightweight check; the API routes do a full DB check
-    if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
-      // The role will be verified in the actual API handler
-      // Middleware just ensures a valid session exists
-    }
-
     // Attach userId to request headers for downstream use
-    const response = NextResponse.next()
+    const response = addSecurityHeaders(NextResponse.next())
     response.headers.set('x-user-id', userId)
     return response
   } catch {
     // Invalid or expired token
     if (pathname.startsWith('/api/')) {
-      return NextResponse.json({ error: 'Session expired' }, { status: 401 })
+      return addSecurityHeaders(
+        NextResponse.json({ error: 'Session expired' }, { status: 401 })
+      )
     }
     return NextResponse.redirect(new URL('/login', request.url))
   }
@@ -76,5 +90,7 @@ export const config = {
     '/api/chat',
     '/api/mcp/:path*',
     '/api/admin/:path*',
+    '/login',
+    '/',
   ],
 }

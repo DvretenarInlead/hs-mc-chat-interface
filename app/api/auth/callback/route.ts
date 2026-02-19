@@ -7,6 +7,12 @@ import { encrypt } from '@/lib/auth/encryption'
 import { createSession, setSessionCookie } from '@/lib/auth/session'
 import { prisma } from '@/lib/db/prisma'
 
+function redirectWithCleanup(request: NextRequest, path: string): NextResponse {
+  const response = NextResponse.redirect(new URL(path, request.url))
+  response.cookies.delete('hubspot_oauth_state')
+  return response
+}
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams
   const code = searchParams.get('code')
@@ -16,23 +22,17 @@ export async function GET(request: NextRequest) {
   // Check for OAuth errors
   if (error) {
     console.error('HubSpot OAuth error:', error)
-    return NextResponse.redirect(
-      new URL('/login?error=oauth_error', request.url)
-    )
+    return redirectWithCleanup(request, '/login?error=oauth_error')
   }
 
   if (!code) {
-    return NextResponse.redirect(
-      new URL('/login?error=no_code', request.url)
-    )
+    return redirectWithCleanup(request, '/login?error=no_code')
   }
 
   // Verify CSRF state
   const storedState = request.cookies.get('hubspot_oauth_state')?.value
   if (!state || !storedState || state !== storedState) {
-    return NextResponse.redirect(
-      new URL('/login?error=invalid_state', request.url)
-    )
+    return redirectWithCleanup(request, '/login?error=invalid_state')
   }
 
   try {
@@ -69,11 +69,8 @@ export async function GET(request: NextRequest) {
     const sessionToken = await createSession(user.id)
     await setSessionCookie(sessionToken)
 
-    // Clear the OAuth state cookie
-    const response = NextResponse.redirect(new URL('/chat', request.url))
-    response.cookies.delete('hubspot_oauth_state')
-
-    // Set the session cookie on the redirect response too
+    // Redirect to chat with session cookie
+    const response = redirectWithCleanup(request, '/chat')
     response.cookies.set('ri_session', sessionToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -84,9 +81,11 @@ export async function GET(request: NextRequest) {
 
     return response
   } catch (err) {
-    console.error('OAuth callback error:', err)
-    return NextResponse.redirect(
-      new URL('/login?error=auth_failed', request.url)
+    // Log only the error message, not the full object (may contain tokens)
+    console.error(
+      'OAuth callback error:',
+      err instanceof Error ? err.message : 'Unknown error'
     )
+    return redirectWithCleanup(request, '/login?error=auth_failed')
   }
 }

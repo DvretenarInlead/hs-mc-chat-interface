@@ -92,7 +92,11 @@ export async function POST(request: NextRequest) {
           },
         })
       } catch (error) {
-        console.error('Chat API error:', error)
+        // Log only the message, never the full error object (may contain tokens/secrets)
+        console.error(
+          'Chat API error:',
+          error instanceof Error ? error.message : 'Unknown error'
+        )
         const errorMessage =
           error instanceof Error && error.message.includes('token')
             ? 'Your HubSpot session has expired. Please log in again.'
