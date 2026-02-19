@@ -1,4 +1,4 @@
-import { PrismaClient, RuleAction, UserRole } from '@prisma/client'
+import { PrismaClient, RuleAction, UserRole, SensitivityCategory, MaskStyle } from '@prisma/client'
 
 const prisma = new PrismaClient()
 
@@ -108,6 +108,72 @@ async function main() {
   }
 
   console.log(`Seeded ${DEFAULT_RULES.length} governance rules.`)
+
+  // Seed default sensitivity rules
+  console.log('Seeding default sensitivity rules...')
+
+  const SENSITIVITY_RULES = [
+    {
+      id: 'builtin_email',
+      name: 'Email Address',
+      description: 'Masks email addresses in chat responses',
+      pattern: '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}',
+      category: SensitivityCategory.EMAIL,
+      maskStyle: MaskStyle.PARTIAL,
+      isBuiltIn: true,
+      isActive: true,
+    },
+    {
+      id: 'builtin_phone',
+      name: 'Phone Number (US)',
+      description: 'Masks US phone numbers in chat responses',
+      pattern: '(?:\\+1[\\s.-]?)?(?:\\(?\\d{3}\\)?[\\s.-]?)\\d{3}[\\s.-]?\\d{4}',
+      category: SensitivityCategory.PHONE,
+      maskStyle: MaskStyle.PARTIAL,
+      isBuiltIn: true,
+      isActive: true,
+    },
+    {
+      id: 'builtin_ssn',
+      name: 'Social Security Number',
+      description: 'Redacts SSN patterns in chat responses',
+      pattern: '\\b\\d{3}-\\d{2}-\\d{4}\\b',
+      category: SensitivityCategory.SSN,
+      maskStyle: MaskStyle.REDACT,
+      isBuiltIn: true,
+      isActive: true,
+    },
+    {
+      id: 'builtin_credit_card',
+      name: 'Credit Card Number',
+      description: 'Redacts credit card number patterns',
+      pattern: '\\b(?:\\d{4}[\\s-]?){3}\\d{4}\\b',
+      category: SensitivityCategory.CREDIT_CARD,
+      maskStyle: MaskStyle.REDACT,
+      isBuiltIn: true,
+      isActive: true,
+    },
+    {
+      id: 'builtin_api_key',
+      name: 'API Key Pattern',
+      description: 'Masks API keys and tokens that may appear in CRM data',
+      pattern: '(?:sk|pk|api|key|token|secret)[_-]?[a-zA-Z0-9]{20,}',
+      category: SensitivityCategory.API_KEY,
+      maskStyle: MaskStyle.FULL,
+      isBuiltIn: true,
+      isActive: true,
+    },
+  ]
+
+  for (const rule of SENSITIVITY_RULES) {
+    await prisma.sensitivityRule.upsert({
+      where: { id: rule.id },
+      update: { ...rule },
+      create: { ...rule },
+    })
+  }
+
+  console.log(`Seeded ${SENSITIVITY_RULES.length} sensitivity rules.`)
 }
 
 main()

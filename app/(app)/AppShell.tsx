@@ -5,12 +5,14 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import Badge from '@/components/ui/Badge'
 import ErrorBoundary from '@/components/ui/ErrorBoundary'
+import SetPinDialog from '@/components/chat/SetPinDialog'
 
 interface AppShellProps {
   user: {
     name: string
     email: string
     role: string
+    hasChatPin: boolean
   }
   children: ReactNode
 }
@@ -20,6 +22,8 @@ export default function AppShell({ user, children }: AppShellProps) {
   const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [loggingOut, setLoggingOut] = useState(false)
+  const [showPinDialog, setShowPinDialog] = useState(false)
+  const [lockingChat, setLockingChat] = useState(false)
 
   const roleBadgeVariant =
     user.role === 'ADMIN'
@@ -34,6 +38,17 @@ export default function AppShell({ user, children }: AppShellProps) {
       await fetch('/api/auth/logout', { method: 'POST' })
     } finally {
       router.push('/login')
+    }
+  }, [router])
+
+  const handleLockChat = useCallback(async () => {
+    setLockingChat(true)
+    try {
+      await fetch('/api/auth/chat-lock-status', { method: 'POST' })
+      router.push('/chat')
+      router.refresh()
+    } finally {
+      setLockingChat(false)
     }
   }, [router])
 
@@ -56,6 +71,15 @@ export default function AppShell({ user, children }: AppShellProps) {
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+        </svg>
+      ),
+    },
+    {
+      href: '/admin/sensitivity',
+      label: 'Data Sensitivity',
+      icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
         </svg>
       ),
     },
@@ -141,6 +165,31 @@ export default function AppShell({ user, children }: AppShellProps) {
         )}
       </nav>
 
+      {/* Security actions */}
+      <div className="px-4 py-3 border-t border-gray-800 space-y-1">
+        <button
+          onClick={() => setShowPinDialog(true)}
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-gray-400 hover:bg-gray-800 hover:text-white transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+          </svg>
+          {user.hasChatPin ? 'Change Chat PIN' : 'Set Chat PIN'}
+        </button>
+        {user.hasChatPin && (
+          <button
+            onClick={handleLockChat}
+            disabled={lockingChat}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-amber-400 hover:bg-gray-800 hover:text-amber-300 transition-colors disabled:opacity-50"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+            {lockingChat ? 'Locking...' : 'Lock Chat Now'}
+          </button>
+        )}
+      </div>
+
       {/* User info + logout */}
       <div className="px-4 py-4 border-t border-gray-800">
         <div className="flex items-center gap-3">
@@ -209,6 +258,13 @@ export default function AppShell({ user, children }: AppShellProps) {
 
         <ErrorBoundary>{children}</ErrorBoundary>
       </div>
+
+      {/* PIN dialog */}
+      <SetPinDialog
+        isOpen={showPinDialog}
+        onClose={() => setShowPinDialog(false)}
+        hasExistingPin={user.hasChatPin}
+      />
     </div>
   )
 }

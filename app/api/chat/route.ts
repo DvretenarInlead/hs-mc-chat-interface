@@ -4,6 +4,8 @@ import { createMCPClient, closeMCPClient } from '@/lib/mcp/client'
 import { getAnthropicTools } from '@/lib/mcp/tool-registry'
 import { runClaudeLoop } from '@/lib/claude/tool-handler'
 import { checkRateLimit } from '@/lib/rate-limit'
+import { verifyChatUnlockToken, PIN_UNLOCK_COOKIE, isPinLockedOut } from '@/lib/auth/pin'
+import { loadSensitivityRules, applyDataMasking } from '@/lib/security/data-masking'
 import { z } from 'zod'
 
 export const runtime = 'nodejs'
@@ -29,7 +31,32 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  // 2. Rate limit check
+  // 2. Chat PIN verification — if user has PIN required, check unlock cookie
+  if (user.chatPinRequired && user.chatPinHash) {
+    if (isPinLockedOut(user.chatPinLockedUntil)) {
+      return NextResponse.json(
+        { error: 'Chat access is temporarily locked due to too many failed PIN attempts.' },
+        { status: 423 }
+      )
+    }
+    const cookieHeader = request.headers.get('cookie') || ''
+    const unlockToken = parseCookieFromHeader(cookieHeader, PIN_UNLOCK_COOKIE)
+    if (!unlockToken) {
+      return NextResponse.json(
+        { error: 'Chat PIN verification required', code: 'PIN_REQUIRED' },
+        { status: 403 }
+      )
+    }
+    const tokenUserId = await verifyChatUnlockToken(unlockToken)
+    if (tokenUserId !== user.id) {
+      return NextResponse.json(
+        { error: 'Chat PIN verification required', code: 'PIN_REQUIRED' },
+        { status: 403 }
+      )
+    }
+  }
+
+  // 3. Rate limit check
   const rateLimit = checkRateLimit(user.id)
   if (!rateLimit.allowed) {
     return NextResponse.json(
@@ -82,6 +109,9 @@ export async function POST(request: NextRequest) {
         mcpClient = await createMCPClient(accessToken)
         const tools = await getAnthropicTools(mcpClient)
 
+        // Load sensitivity rules for data masking
+        const sensitivityRules = await loadSensitivityRules()
+
         // Run the Claude tool call loop
         await runClaudeLoop({
           user,
@@ -90,7 +120,8 @@ export async function POST(request: NextRequest) {
           mcpClient,
           confirmationToken,
           onChunk: (text) => {
-            const data = JSON.stringify({ type: 'text', content: text })
+            const masked = applyDataMasking(text, sensitivityRules)
+            const data = JSON.stringify({ type: 'text', content: masked })
             controller.enqueue(encoder.encode(`data: ${data}\n\n`))
           },
           onToolCallStart: (toolName) => {
@@ -142,9 +173,20 @@ export async function POST(request: NextRequest) {
 
 function sanitizeInput(input: string): string {
   if (typeof input !== 'string') return ''
-  // Remove any null bytes
   let sanitized = input.replace(/\0/g, '')
-  // Trim excessive length
   sanitized = sanitized.slice(0, 10000)
   return sanitized
+}
+
+function parseCookieFromHeader(cookieHeader: string, name: string): string | undefined {
+  if (!cookieHeader) return undefined
+  const cookies: Record<string, string> = {}
+  cookieHeader.split(';').forEach((c) => {
+    const eqIdx = c.indexOf('=')
+    if (eqIdx === -1) return
+    const n = c.slice(0, eqIdx).trim()
+    const v = c.slice(eqIdx + 1).trim()
+    if (n) cookies[n] = v
+  })
+  return cookies[name]
 }

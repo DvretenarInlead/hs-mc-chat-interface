@@ -17,6 +17,11 @@ model User {
   accessToken     String     // HubSpot access token (encrypted at rest)
   refreshToken    String     // HubSpot refresh token (encrypted at rest)
   tokenExpiresAt  DateTime
+  chatPinHash     String?    // PBKDF2-hashed chat access PIN
+  chatPinRequired Boolean    @default(false) // Whether PIN is required to access chat
+  chatPinSetAt    DateTime?  // When the PIN was last set/changed
+  chatPinFailures Int        @default(0) // Consecutive failed PIN attempts
+  chatPinLockedUntil DateTime? // Lockout after too many failures
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
   sessions        Session[]
@@ -109,4 +114,34 @@ enum LogStatus {
   APPROVED
   REJECTED
   BLOCKED
+}
+
+model SensitivityRule {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  pattern     String   // Regex pattern to detect sensitive data
+  category    SensitivityCategory
+  maskStyle   MaskStyle @default(FULL)
+  isActive    Boolean  @default(true)
+  isBuiltIn   Boolean  @default(false) // Built-in rules cannot be deleted
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("sensitivity_rules")
+}
+
+enum SensitivityCategory {
+  EMAIL
+  PHONE
+  SSN
+  CREDIT_CARD
+  API_KEY
+  CUSTOM
+}
+
+enum MaskStyle {
+  FULL      // ********
+  PARTIAL   // jo***@***.com
+  REDACT    // [REDACTED]
 }

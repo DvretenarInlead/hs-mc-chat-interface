@@ -1,5 +1,10 @@
 import ChatWindow from '@/components/chat/ChatWindow'
+import ChatPinGate from '@/components/chat/ChatPinGate'
 
 export default function ChatPage() {
-  return <ChatWindow />
+  return (
+    <ChatPinGate>
+      <ChatWindow />
+    </ChatPinGate>
+  )
 }
