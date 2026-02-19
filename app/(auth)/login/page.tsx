@@ -8,10 +8,15 @@ function LoginContent() {
   const error = searchParams.get('error')
 
   const errorMessages: Record<string, string> = {
-    oauth_error: 'There was a problem authenticating with HubSpot. Please try again.',
-    no_code: 'No authorization code received. Please try again.',
-    invalid_state: 'Invalid request. Please try again.',
+    oauth_error: 'HubSpot denied the authorization request. Please try again.',
+    no_code: 'No authorization code received from HubSpot. Please try again.',
+    invalid_state: 'Session expired or invalid request. Please try again.',
     auth_failed: 'Authentication failed. Please try again.',
+    token_exchange_failed: 'Failed to exchange token with HubSpot. The redirect URI may be misconfigured — check HUBSPOT_REDIRECT_URI.',
+    user_info_failed: 'Connected to HubSpot but failed to retrieve your user info.',
+    encryption_failed: 'Server config error: TOKEN_ENCRYPTION_KEY may be missing or invalid.',
+    db_upsert_failed: 'Database error — could not save your account. Check DATABASE_URL and run migrations.',
+    session_failed: 'Could not create session. Check SESSION_SECRET is set.',
   }
 
   return (
