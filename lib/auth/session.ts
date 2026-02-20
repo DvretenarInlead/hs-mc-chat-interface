@@ -75,9 +75,13 @@ export async function getSessionFromCookie(): Promise<{ user: User } | null> {
 }
 
 export async function getUserFromRequest(req: Request): Promise<User | null> {
+  // Check Authorization header first (used by HubSpot embed iframe)
+  const authHeader = req.headers.get('authorization')
+  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null
+
   const cookieHeader = req.headers.get('cookie') || ''
   const cookies = parseCookies(cookieHeader)
-  const token = cookies[SESSION_COOKIE_NAME]
+  const token = bearerToken || cookies[SESSION_COOKIE_NAME]
 
   if (!token) return null
 

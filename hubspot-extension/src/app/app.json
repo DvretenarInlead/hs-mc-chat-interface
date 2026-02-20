@@ -1,0 +1,26 @@
+{
+  "name": "Relationship Intelligence",
+  "description": "AI-powered CRM chat assistant embedded directly in your HubSpot records",
+  "uid": "relationship-intelligence",
+  "scopes": [
+    "oauth",
+    "crm.objects.contacts.read",
+    "crm.objects.contacts.write",
+    "crm.objects.companies.read",
+    "crm.objects.companies.write",
+    "crm.objects.deals.read",
+    "crm.objects.deals.write",
+    "crm.schemas.contacts.read"
+  ],
+  "public": true,
+  "extensions": {
+    "crm": {
+      "cards": [
+        {
+          "file": "extensions/relationship-intelligence-card.json"
+        }
+      ]
+    }
+  },
+  "allowedUrls": []
+}

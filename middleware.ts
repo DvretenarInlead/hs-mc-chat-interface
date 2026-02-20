@@ -32,6 +32,25 @@ function addSecurityHeaders(response: NextResponse, requestId: string): NextResp
   return response
 }
 
+/**
+ * Security headers for HubSpot embed routes — allows iframe from HubSpot domains.
+ */
+function addEmbedHeaders(response: NextResponse, requestId: string): NextResponse {
+  response.headers.set('X-Request-Id', requestId)
+  response.headers.set('X-Content-Type-Options', 'nosniff')
+  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
+  // Allow HubSpot to iframe this page
+  response.headers.delete('X-Frame-Options')
+  response.headers.set(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors https://*.hubspot.com https://*.hubspotusercontent.com"
+  )
+  if (process.env.NODE_ENV === 'production') {
+    response.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+  }
+  return response
+}
+
 function getAppBaseUrl(request: NextRequest): string {
   if (process.env.NEXTAUTH_URL) {
     return process.env.NEXTAUTH_URL
@@ -67,6 +86,15 @@ export async function middleware(request: NextRequest) {
     return addSecurityHeaders(NextResponse.next(), requestId)
   }
 
+  // HubSpot embed routes — token-based auth handled by the routes themselves
+  const isHubSpotEmbedRoute =
+    pathname.startsWith('/api/hubspot/') ||
+    pathname === '/hubspot-embed'
+
+  if (isHubSpotEmbedRoute) {
+    return addEmbedHeaders(NextResponse.next(), requestId)
+  }
+
   // Routes that require authentication
   const isProtectedRoute =
     pathname.startsWith('/chat') ||
@@ -79,7 +107,12 @@ export async function middleware(request: NextRequest) {
     return addSecurityHeaders(NextResponse.next(), requestId)
   }
 
-  if (!sessionToken) {
+  // Also check for Bearer token (used by HubSpot embed iframe for /api/chat)
+  const authHeader = request.headers.get('authorization')
+  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null
+  const tokenToVerify = sessionToken || bearerToken
+
+  if (!tokenToVerify) {
     if (pathname.startsWith('/api/')) {
       return addSecurityHeaders(
         NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
@@ -100,14 +133,16 @@ export async function middleware(request: NextRequest) {
   }
 
   try {
-    const { payload } = await jwtVerify(sessionToken, secret)
+    const { payload } = await jwtVerify(tokenToVerify, secret)
     const userId = payload.userId as string
 
     if (!userId) {
       throw new Error('Invalid session')
     }
 
-    const response = addSecurityHeaders(NextResponse.next(), requestId)
+    // Use embed headers for API requests from the HubSpot iframe
+    const headerFn = bearerToken ? addEmbedHeaders : addSecurityHeaders
+    const response = headerFn(NextResponse.next(), requestId)
     response.headers.set('x-user-id', userId)
     response.headers.set('x-request-id', requestId)
     return response
@@ -127,10 +162,12 @@ export const config = {
   matcher: [
     '/chat/:path*',
     '/admin/:path*',
+    '/hubspot-embed',
     '/api/chat/:path*',
     '/api/mcp/:path*',
     '/api/admin/:path*',
     '/api/auth/:path*',
+    '/api/hubspot/:path*',
     '/login',
     '/register',
     '/',

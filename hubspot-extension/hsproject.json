@@ -1,0 +1,6 @@
+{
+  "name": "relationship-intelligence-crm-card",
+  "description": "Relationship Intelligence chat interface embedded in HubSpot CRM records",
+  "srcDir": "src",
+  "platformVersion": "2025.2"
+}

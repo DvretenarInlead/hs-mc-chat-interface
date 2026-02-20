@@ -1,0 +1,16 @@
+{
+  "type": "crm-card",
+  "data": {
+    "title": "Relationship Intelligence",
+    "uid": "ri-chat-card",
+    "location": "crm.record.tab",
+    "module": {
+      "file": "RelationshipIntelligenceCard.jsx"
+    },
+    "objectTypes": [
+      { "name": "contacts" },
+      { "name": "companies" },
+      { "name": "deals" }
+    ]
+  }
+}
