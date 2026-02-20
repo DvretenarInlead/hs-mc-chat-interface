@@ -9,7 +9,7 @@ if [ $? -eq 0 ]; then
   echo "Migrations completed successfully."
   echo "$MIGRATE_OUTPUT"
   echo "Running seed..."
-  node node_modules/tsx/dist/cli.mjs prisma/seed.ts 2>&1 || echo "Seed failed (non-fatal)"
+  node prisma/seed.js 2>&1 || echo "Seed failed (non-fatal)"
   echo "Starting server..."
   exec node server.js
 fi
@@ -52,7 +52,7 @@ CREATESCHEMA
     echo "Migrations succeeded with 'app' schema."
     echo "$MIGRATE_OUTPUT2"
     echo "Running seed..."
-    node node_modules/tsx/dist/cli.mjs prisma/seed.ts 2>&1 || echo "Seed failed (non-fatal)"
+    node prisma/seed.js 2>&1 || echo "Seed failed (non-fatal)"
     echo "Starting server..."
     exec node server.js
   fi
@@ -67,7 +67,7 @@ CREATESCHEMA
     echo "db push succeeded with 'app' schema."
     echo "$PUSH_OUTPUT"
     echo "Running seed..."
-    node node_modules/tsx/dist/cli.mjs prisma/seed.ts 2>&1 || echo "Seed failed (non-fatal)"
+    node prisma/seed.js 2>&1 || echo "Seed failed (non-fatal)"
     echo "Starting server..."
     exec node server.js
   fi
@@ -82,7 +82,7 @@ else
     echo "db push succeeded."
     echo "$PUSH_OUTPUT"
     echo "Running seed..."
-    node node_modules/tsx/dist/cli.mjs prisma/seed.ts 2>&1 || echo "Seed failed (non-fatal)"
+    node prisma/seed.js 2>&1 || echo "Seed failed (non-fatal)"
     echo "Starting server..."
     exec node server.js
   fi
