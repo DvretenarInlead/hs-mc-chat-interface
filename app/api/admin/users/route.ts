@@ -62,6 +62,71 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({ users: sanitizedUsers })
 }
 
+const createUserSchema = z.object({
+  email: z.string().email().max(255).transform((e) => e.toLowerCase().trim()),
+  name: z.string().min(1).max(100).transform((n) => n.trim()),
+  role: z.nativeEnum(UserRole).default(UserRole.VIEWER),
+})
+
+export async function POST(request: NextRequest) {
+  const auth = await requireAdmin(request)
+  if ('error' in auth) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status })
+  }
+
+  let body: unknown
+  try {
+    body = await request.json()
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+  }
+
+  const parsed = createUserSchema.safeParse(body)
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: 'Validation error', details: parsed.error.flatten() },
+      { status: 400 }
+    )
+  }
+
+  // Check if user already exists
+  const existing = await prisma.user.findUnique({
+    where: { email: parsed.data.email },
+  })
+  if (existing) {
+    return NextResponse.json(
+      { error: 'A user with this email already exists' },
+      { status: 409 }
+    )
+  }
+
+  const user = await prisma.user.create({
+    data: {
+      email: parsed.data.email,
+      name: parsed.data.name,
+      role: parsed.data.role,
+    },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      createdAt: true,
+    },
+  })
+
+  await logSecurityEvent({
+    userId: user.id,
+    userEmail: user.email,
+    eventType: 'USER_REGISTERED',
+    detail: `User ${user.email} (${user.role}) created by admin ${auth.user.email}`,
+    ipAddress: getClientIp(request),
+    userAgent: getUserAgent(request),
+  })
+
+  return NextResponse.json({ user }, { status: 201 })
+}
+
 const updateUserSchema = z.object({
   userId: z.string().min(1).max(100),
   role: z.nativeEnum(UserRole).optional(),

@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Badge from '@/components/ui/Badge'
+import Button from '@/components/ui/Button'
+import Input from '@/components/ui/Input'
+import Modal from '@/components/ui/Modal'
 
 interface PortalInfo {
   id: string
@@ -35,6 +38,9 @@ export default function UserManagement() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
+  const [showCreateModal, setShowCreateModal] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [createForm, setCreateForm] = useState({ email: '', name: '', role: 'VIEWER' as string })
 
   const fetchData = useCallback(async () => {
     try {
@@ -81,6 +87,29 @@ export default function UserManagement() {
     }
   }
 
+  const createUser = async () => {
+    setCreating(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(createForm),
+      })
+      if (!res.ok) {
+        const result = await res.json()
+        throw new Error(result.error || 'Failed to create user')
+      }
+      setShowCreateModal(false)
+      setCreateForm({ email: '', name: '', role: 'VIEWER' })
+      await fetchData()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create user')
+    } finally {
+      setCreating(false)
+    }
+  }
+
   const isLockedOut = (user: UserRecord) => {
     if (!user.chatPinLockedUntil) return false
     return new Date(user.chatPinLockedUntil) > new Date()
@@ -96,12 +125,66 @@ export default function UserManagement() {
 
   return (
     <div>
-      <div className="mb-6">
-        <h2 className="text-lg font-semibold text-gray-900">User Management</h2>
-        <p className="text-sm text-gray-500 mt-1">
-          Manage user roles, portal assignments, and chat PIN security.
-        </p>
+      <div className="mb-6 flex items-start justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">User Management</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            Manage user roles, portal assignments, and chat PIN security.
+          </p>
+        </div>
+        <Button size="sm" onClick={() => setShowCreateModal(true)}>
+          + Create User
+        </Button>
       </div>
+
+      <Modal
+        isOpen={showCreateModal}
+        onClose={() => { setShowCreateModal(false); setError(null) }}
+        title="Create New User"
+      >
+        <div className="space-y-4">
+          <Input
+            label="Email"
+            type="email"
+            placeholder="user@example.com"
+            value={createForm.email}
+            onChange={(e) => setCreateForm((f) => ({ ...f, email: e.target.value }))}
+          />
+          <Input
+            label="Name"
+            placeholder="Full name"
+            value={createForm.name}
+            onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))}
+          />
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+            <select
+              value={createForm.role}
+              onChange={(e) => setCreateForm((f) => ({ ...f, role: e.target.value }))}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="VIEWER">Viewer</option>
+              <option value="POWER_USER">Power User</option>
+              <option value="ADMIN">Admin</option>
+            </select>
+          </div>
+          {error && (
+            <p className="text-sm text-red-600">{error}</p>
+          )}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="secondary" size="sm" onClick={() => { setShowCreateModal(false); setError(null) }}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={creating || !createForm.email || !createForm.name}
+              onClick={createUser}
+            >
+              {creating ? 'Creating...' : 'Create User'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {error && (
         <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
